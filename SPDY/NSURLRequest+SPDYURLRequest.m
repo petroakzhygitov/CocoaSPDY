@@ -23,9 +23,9 @@
     return [[SPDYProtocol propertyForKey:@"SPDYPriority" inRequest:self] unsignedIntegerValue];
 }
 
-- (BOOL)SPDYDiscretionary
+- (NSTimeInterval)SPDYDeferrableInterval
 {
-    return [[SPDYProtocol propertyForKey:@"SPDYDiscretionary" inRequest:self] boolValue];
+    return [[SPDYProtocol propertyForKey:@"SPDYDeferrableInterval" inRequest:self] doubleValue];
 }
 
 - (BOOL)SPDYBypass
@@ -144,14 +144,14 @@
     [SPDYProtocol setProperty:@(priority) forKey:@"SPDYPriority" inRequest:self];
 }
 
-- (BOOL)SPDYDiscretionary
+- (NSTimeInterval)SPDYDeferrableInterval
 {
-    return [[SPDYProtocol propertyForKey:@"SPDYDiscretionary" inRequest:self] boolValue];
+    return [[SPDYProtocol propertyForKey:@"SPDYDeferrableInterval" inRequest:self] doubleValue];
 }
 
-- (void)setSPDYDiscretionary:(BOOL)Discretionary
+- (void)setSPDYDeferrableInterval:(NSTimeInterval)deferrableInterval
 {
-    [SPDYProtocol setProperty:@(Discretionary) forKey:@"SPDYDiscretionary" inRequest:self];
+    [SPDYProtocol setProperty:@(deferrableInterval) forKey:@"SPDYDeferrableInterval" inRequest:self];
 }
 
 - (BOOL)SPDYBypass

@@ -170,7 +170,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
     if (*pool) {
         session = [*pool next];
-        if (!session && !protocol.request.SPDYDiscretionary) {
+        if (!session && !protocol.request.SPDYDeferrableInterval > 0) {
             *pool = [[SPDYSessionPool alloc] initWithOrigin:_origin
                                                       size:currentConfiguration.sessionPoolSize
                                                      error:pError];
