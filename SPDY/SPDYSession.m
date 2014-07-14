@@ -38,6 +38,10 @@
 #define REMOTE_MAX_CONCURRENT_STREAMS  INT32_MAX
 #define INCLUDE_SPDY_RESPONSE_HEADERS  1
 
+@interface SPDYProtocol (Private)
+- (void)setSession:(SPDYSession *)session;
+@end
+
 @interface SPDYSession () <SPDYFrameDecoderDelegate, SPDYFrameEncoderDelegate, SPDYStreamDataDelegate, SPDYSocketDelegate>
 @property (nonatomic, readonly) SPDYStreamId nextStreamId;
 - (void)_sendSynStream:(SPDYStream *)stream streamId:(SPDYStreamId)streamId closeLocal:(bool)close;
@@ -54,7 +58,7 @@
     SPDYFrameDecoder *_frameDecoder;
     SPDYFrameEncoder *_frameEncoder;
     SPDYStreamManager *_activeStreams;
-    SPDYStreamManager *_inactiveStreams;
+    SPDYStreamManager *_pendingStreams;
     SPDYSocket *_socket;
     NSMutableData *_inputBuffer;
 
@@ -121,7 +125,7 @@
             _frameEncoder = [[SPDYFrameEncoder alloc] initWithDelegate:self
                                                 headerCompressionLevel:configuration.headerCompressionLevel];
             _activeStreams = [[SPDYStreamManager alloc] init];
-            _inactiveStreams = [[SPDYStreamManager alloc] init];
+            _pendingStreams = _manager.pendingStreams;
             _inputBuffer = [[NSMutableData alloc] initWithCapacity:INITIAL_INPUT_BUFFER_SIZE];
 
             _lastGoodStreamId = 0;
@@ -173,12 +177,12 @@
     return self;
 }
 
-- (void)issueRequest:(SPDYProtocol *)protocol
+- (void)dispatchRequest:(SPDYProtocol *)protocol
 {
-    SPDYStream *stream = [[SPDYStream alloc] initWithProtocol:protocol dataDelegate:self];
+    SPDYStream *stream = [[SPDYStream alloc] initWithProtocol:protocol];
 
     if (_activeStreams.localCount >= _remoteMaxConcurrentStreams) {
-        [_inactiveStreams addStream:stream];
+        [_pendingStreams addStream:stream];
         SPDY_INFO(@"max concurrent streams reached, deferring request");
         return;
     }
@@ -186,13 +190,13 @@
     [self _startStream:stream];
 }
 
-- (void)_issuePendingRequests
+- (void)_dispatchPendingRequests
 {
     SPDYStream *stream;
 
-    while (_inactiveStreams.localCount > 0 && _activeStreams.localCount < _remoteMaxConcurrentStreams) {
-        stream = [_inactiveStreams nextPriorityStream];
-        [_inactiveStreams removeStreamForProtocol:stream.protocol];
+    while (_pendingStreams.localCount > 0 && _activeStreams.localCount < _remoteMaxConcurrentStreams) {
+        stream = [_pendingStreams nextPriorityStream];
+        [_pendingStreams removeStreamForProtocol:stream.protocol];
         [self _startStream:stream];
     }
 }
@@ -200,6 +204,8 @@
 - (void)_startStream:(SPDYStream *)stream
 {
     SPDYStreamId streamId = [self nextStreamId];
+    stream.dataDelegate = self;
+    stream.protocol.session = self;
     [stream startWithStreamId:streamId
                sendWindowSize:_initialSendWindowSize
             receiveWindowSize:_initialReceiveWindowSize];
@@ -217,16 +223,12 @@
 - (void)cancelRequest:(SPDYProtocol *)protocol
 {
     SPDYStream *stream = _activeStreams[protocol];
-    if (!stream) {
-        stream = _inactiveStreams[protocol];
-    }
 
     if (stream) {
         [self _sendRstStream:SPDY_STREAM_CANCEL streamId:stream.streamId];
         stream.client = nil;
         [_activeStreams removeStreamForProtocol:protocol];
-        [_inactiveStreams removeStreamForProtocol:protocol];
-        [self _issuePendingRequests];
+        [self _dispatchPendingRequests];
     }
 }
 
@@ -287,6 +289,8 @@
         setsockopt(*sock, IPPROTO_TCP, TCP_NODELAY, &(int){ 1 }, sizeof(int));
         CFRelease(nativeSocket);
     }
+
+    [self _dispatchPendingRequests];
 }
 
 - (void)socket:(SPDYSocket *)socket didReadData:(NSData *)data withTag:(long)tag
@@ -331,6 +335,16 @@
     }
 }
 
+//- (void)socket:(SPDYSocket *)socket didWriteDataForStreamId:(SPDYStreamId)streamId
+//{
+//
+//}
+//
+//- (void)socket:(SPDYSocket *)socket didWritePingForPingId:(SPDYPingId)pingId
+//{
+//
+//}
+
 - (void)socket:(SPDYSocket *)socket didWritePartialDataOfLength:(NSUInteger)partialLength tag:(long)tag
 {
     _lastSocketActivity = CFAbsoluteTimeGetCurrent();
@@ -350,7 +364,7 @@
 {
     _lastSocketActivity = CFAbsoluteTimeGetCurrent();
     SPDY_INFO(@"session connection closed");
-    [SPDYSessionManager removeSession:self];
+    [_manager removeSession:self];
 }
 
 #pragma mark SPDYStreamDataDelegate
@@ -504,7 +518,7 @@
     stream.remoteSideClosed = dataFrame.last;
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [self _issuePendingRequests];
+        [self _dispatchPendingRequests];
     }
 }
 
@@ -593,7 +607,7 @@
 
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [self _issuePendingRequests];
+        [self _dispatchPendingRequests];
     }
 }
 
@@ -615,7 +629,7 @@
     if (stream) {
         [stream closeWithStatus:rstStreamFrame.statusCode];
         [_activeStreams removeStreamWithStreamId:streamId];
-        [self _issuePendingRequests];
+        [self _dispatchPendingRequests];
     }
 }
 
@@ -665,7 +679,7 @@
         }
     }
 
-    [self _issuePendingRequests];
+    [self _dispatchPendingRequests];
 }
 
 - (void)didReadPingFrame:(SPDYPingFrame *)pingFrame frameDecoder:(SPDYFrameDecoder *)frameDecoder
@@ -717,7 +731,7 @@
     stream.remoteSideClosed = headersFrame.last;
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [self _issuePendingRequests];
+        [self _dispatchPendingRequests];
     }
 }
 
@@ -848,7 +862,7 @@
                 [self _sendRstStream:SPDY_STREAM_CANCEL streamId:streamId];
                 [stream closeWithError:error];
                 [_activeStreams removeStreamWithStreamId:streamId];
-                [self _issuePendingRequests];
+                [self _dispatchPendingRequests];
             }
 
             // -[SPDYStream hasDataAvailable] may return true if we need to perform
@@ -871,7 +885,7 @@
 
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [self _issuePendingRequests];
+        [self _dispatchPendingRequests];
     }
 }
 

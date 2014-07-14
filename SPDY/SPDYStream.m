@@ -67,19 +67,18 @@
     return self;
 }
 
-- (id)initWithProtocol:(SPDYProtocol *)protocol dataDelegate:(id<SPDYStreamDataDelegate>)delegate
+- (id)initWithProtocol:(SPDYProtocol *)protocol
 {
     self = [super init];
     if (self) {
         _protocol = protocol;
         _client = protocol.client;
         _request = protocol.request;
-        _priority = MIN((uint8_t)_request.SPDYPriority, 0x07);
+        _priority = (uint8_t)MIN(_request.SPDYPriority, 0x07);
         _local = YES;
         _localSideClosed = NO;
         _remoteSideClosed = NO;
         _receivedReply = NO;
-        _dataDelegate = delegate;
     }
     return self;
 }

@@ -33,6 +33,7 @@ static char *const SPDYTrustQueue = "com.twitter.SPDYTrustQueue";
 
 @implementation SPDYProtocol
 {
+    SPDYSessionManager *_manager;
     SPDYSession *_session;
 }
 
@@ -101,11 +102,14 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
     SPDY_INFO(@"start loading %@", request.URL.absoluteString);
 
     NSError *error;
-    _session = [SPDYSessionManager sessionForURL:request.URL error:&error];
-    if (!_session) {
+    SPDYOrigin *origin = [[SPDYOrigin alloc] initWithURL:request.URL error:&error];
+    if (origin) {
+        _manager = [SPDYSessionManager localManagerForOrigin:origin];
+        [_manager queueRequest:self error:&error];
+    }
+
+    if (error) {
         [self.client URLProtocol:self didFailWithError:error];
-    } else {
-        [_session issueRequest:self];
     }
 }
 
@@ -115,7 +119,14 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
 
     if (_session) {
         [_session cancelRequest:self];
+    } else if (_manager) {
+        [_manager cancelRequest:self];
     }
+}
+
+- (void)setSession:(SPDYSession *)session
+{
+    _session = session;
 }
 
 @end

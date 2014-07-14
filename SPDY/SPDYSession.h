@@ -11,12 +11,14 @@
 
 #import <Foundation/Foundation.h>
 
-@class SPDYProtocol;
 @class SPDYConfiguration;
 @class SPDYOrigin;
+@class SPDYProtocol;
+@class SPDYSessionManager;
 
 @interface SPDYSession : NSObject
 
+@property (nonatomic, weak) SPDYSessionManager *manager;
 @property (nonatomic, readonly) SPDYOrigin *origin;
 @property (nonatomic, readonly) bool isCellular;
 @property (nonatomic, readonly) bool isOpen;
@@ -25,7 +27,7 @@
        configuration:(SPDYConfiguration *)configuration
             cellular:(bool)cellular
                error:(NSError **)pError;
-- (void)issueRequest:(SPDYProtocol *)protocol;
+- (void)dispatchRequest:(SPDYProtocol *)protocol;
 - (void)cancelRequest:(SPDYProtocol *)protocol;
 - (void)close;
 
