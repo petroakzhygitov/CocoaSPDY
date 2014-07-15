@@ -43,6 +43,7 @@
 
 - (id)initWithProtocol:(SPDYProtocol *)protocol;
 - (void)startWithStreamId:(SPDYStreamId)id sendWindowSize:(uint32_t)sendWindowSize receiveWindowSize:(uint32_t)receiveWindowSize;
+- (bool)reset;
 - (NSData *)readData:(NSUInteger)length error:(NSError **)pError;
 - (void)closeWithError:(NSError *)error;
 - (void)closeWithStatus:(SPDYStreamStatus)status;

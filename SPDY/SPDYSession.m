@@ -627,8 +627,14 @@
     SPDY_DEBUG(@"received RST_STREAM.%u (%u)", streamId, rstStreamFrame.statusCode);
 
     if (stream) {
-        [stream closeWithStatus:rstStreamFrame.statusCode];
         [_activeStreams removeStreamWithStreamId:streamId];
+
+        if (rstStreamFrame.statusCode == SPDY_STREAM_REFUSED_STREAM && [stream reset]) {
+            [_pendingStreams addStream:stream];
+            return;
+        }
+
+        [stream closeWithStatus:rstStreamFrame.statusCode];
         [self _dispatchPendingRequests];
     }
 }
@@ -711,6 +717,19 @@
     SPDY_DEBUG(@"received GOAWAY.%u (%u)", goAwayFrame.lastGoodStreamId, goAwayFrame.statusCode);
 
     _receivedGoAwayFrame = YES;
+
+    for (SPDYStream *stream in _activeStreams) {
+        SPDYStreamId streamId = stream.streamId;
+        if (stream.local && streamId > goAwayFrame.lastGoodStreamId) {
+            [_activeStreams removeStreamWithStreamId:streamId];
+
+            if ([stream reset]) {
+                [_pendingStreams addStream:stream];
+            } else {
+                [stream closeWithError:SPDY_SESSION_ERROR(goAwayFrame.statusCode, @"SPDY session closed")];
+            }
+        }
+    }
 
     if (_activeStreams.count == 0) {
         [_socket disconnect];

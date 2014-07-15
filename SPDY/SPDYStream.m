@@ -23,6 +23,7 @@
 #define DECOMPRESSED_CHUNK_LENGTH 8192
 #define MIN_WRITE_CHUNK_LENGTH 4096
 #define MAX_WRITE_CHUNK_LENGTH 131072
+#define MAX_DISPATCH_ATTEMPTS 3
 #define USE_CFSTREAM 0
 
 #if USE_CFSTREAM
@@ -50,21 +51,11 @@
     CFRunLoopRef _runLoopRef;
     NSUInteger _writeDataIndex;
     NSUInteger _writeStreamChunkLength;
+    NSUInteger _dispatchAttempts;
     z_stream _zlibStream;
     bool _compressedResponse;
     bool _writeStreamOpened;
     int _zlibStreamStatus;
-}
-
-- (id)init
-{
-    self = [super init];
-    if (self) {
-        _localSideClosed = NO;
-        _remoteSideClosed = NO;
-        _compressedResponse = NO;
-    }
-    return self;
 }
 
 - (id)initWithProtocol:(SPDYProtocol *)protocol
@@ -75,9 +66,11 @@
         _client = protocol.client;
         _request = protocol.request;
         _priority = (uint8_t)MIN(_request.SPDYPriority, 0x07);
+        _dispatchAttempts = 0;
         _local = YES;
         _localSideClosed = NO;
         _remoteSideClosed = NO;
+        _compressedResponse = NO;
         _receivedReply = NO;
     }
     return self;
@@ -111,10 +104,27 @@
     }
 }
 
-- (void)setDataStream:(NSInputStream *)dataStream
+- (bool)reset
 {
-    _dataStream = dataStream;
-    _dataStreamRef = (__bridge CFReadStreamRef)dataStream;
+    // Requests that use an opaque NSInputStream cannot be reset once started
+    // since no API exists to request a new stream
+    if (_receivedReply ||
+        _dispatchAttempts >= MAX_DISPATCH_ATTEMPTS ||
+        (_streamId && _request.HTTPBodyStream)) {
+        return NO;
+    }
+
+    _dataDelegate = nil;
+    if (_dataStream && (_runLoop || _runLoopRef)) {
+        UNSCHEDULE_STREAM();
+    }
+
+    _streamId = 0;
+    _localSideClosed = NO;
+    _remoteSideClosed = NO;
+    _dispatchAttempts += 1;
+
+    return YES;
 }
 
 - (void)dealloc
@@ -126,6 +136,12 @@
     if (_dataStream && (_runLoop || _runLoopRef)) {
         UNSCHEDULE_STREAM();
     }
+}
+
+- (void)setDataStream:(NSInputStream *)dataStream
+{
+    _dataStream = dataStream;
+    _dataStreamRef = (__bridge CFReadStreamRef)dataStream;
 }
 
 - (void)setProtocol:(SPDYProtocol *)protocol
