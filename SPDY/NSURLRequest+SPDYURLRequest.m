@@ -46,6 +46,7 @@
 - (NSDictionary *)allSPDYHeaderFields
 {
     NSDictionary *httpHeaders = self.allHTTPHeaderFields;
+    NSURL *url = self.URL;
 
     static NSSet *invalidKeys;
     static NSSet *reservedKeys;
@@ -62,18 +63,18 @@
 
     NSString *escapedPath = CFBridgingRelease(CFURLCreateStringByAddingPercentEscapes(
             kCFAllocatorDefault,
-            (CFStringRef)self.URL.path,
+            (__bridge CFStringRef)url.path,
             NULL,
             CFSTR("?"),
             kCFStringEncodingUTF8));
 
     NSMutableString *path = [[NSMutableString alloc] initWithString:escapedPath];
-    NSString *query = self.URL.query;
+    NSString *query = url.query;
     if (query) {
         [path appendFormat:@"?%@", query];
     }
 
-    NSString *fragment = self.URL.fragment;
+    NSString *fragment = url.fragment;
     if (fragment) {
         [path appendFormat:@"#%@", fragment];
     }
@@ -83,8 +84,8 @@
         @":method"  : self.HTTPMethod,
         @":path"    : path,
         @":version" : @"HTTP/1.1",
-        @":host"    : self.URL.host,
-        @":scheme"  : self.URL.scheme
+        @":host"    : url.host,
+        @":scheme"  : url.scheme
     }];
 
     bool hasBodyData = (self.HTTPBody || self.HTTPBodyStream
@@ -110,7 +111,7 @@
     if (self.HTTPShouldHandleCookies) {
         NSString *requestCookies = spdyHeaders[@"cookie"];
         if (!requestCookies || requestCookies.length == 0) {
-            NSArray *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:self.URL];
+            NSArray *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:url];
             if (cookies.count > 0) {
                 NSDictionary *cookieHeaders = [NSHTTPCookie requestHeaderFieldsWithCookies:cookies];
                 spdyHeaders[@"cookie"] = cookieHeaders[@"Cookie"];
@@ -123,8 +124,8 @@
     //     @":method"  : self.HTTPMethod,
     //     @":path"    : path,
     //     @":version" : @"HTTP/1.1",
-    //     @":host"    : self.URL.host,
-    //     @":scheme"  : self.URL.scheme
+    //     @":host"    : url.host,
+    //     @":scheme"  : url.scheme
     // }];
 
     return spdyHeaders;
