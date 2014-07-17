@@ -19,7 +19,6 @@
 @property SPDYStreamManager *pendingStreams;
 
 + (SPDYSessionManager *)localManagerForOrigin:(SPDYOrigin *)origin;
-+ (void)setConfiguration:(SPDYConfiguration *)configuration;
 
 - (void)queueRequest:(SPDYProtocol *)protocol error:(NSError **)pError;
 - (void)cancelRequest:(SPDYProtocol *)protocol;

@@ -26,7 +26,6 @@
 #import "NSURLRequest+SPDYURLRequest.h"
 
 static NSString *const SPDYSessionManagerKey = @"com.twitter.SPDYSessionManager";
-static volatile SPDYConfiguration *currentConfiguration;
 static volatile bool reachabilityIsWWAN;
 
 #if TARGET_OS_IPHONE
@@ -39,7 +38,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 #endif
 
 @interface SPDYSessionPool : NSObject
-- (id)initWithOrigin:(SPDYOrigin *)origin size:(NSUInteger)size error:(NSError **)pError;
+- (id)initWithOrigin:(SPDYOrigin *)origin configuration:(SPDYConfiguration *)configuration error:(NSError **)pError;
 - (NSUInteger)remove:(SPDYSession *)session;
 - (SPDYSession *)next;
 @end
@@ -49,14 +48,15 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     NSMutableArray *_sessions;
 }
 
-- (id)initWithOrigin:(SPDYOrigin *)origin size:(NSUInteger)size error:(NSError **)pError
+- (id)initWithOrigin:(SPDYOrigin *)origin configuration:(SPDYConfiguration *)configuration error:(NSError **)pError
 {
     self = [super init];
     if (self) {
+        NSUInteger size = configuration.sessionPoolSize;
         _sessions = [[NSMutableArray alloc] initWithCapacity:size];
         for (NSUInteger i = 0; i < size; i++) {
             SPDYSession *session = [[SPDYSession alloc] initWithOrigin:origin
-                                                         configuration:[currentConfiguration copy]
+                                                         configuration:configuration
                                                               cellular:reachabilityIsWWAN
                                                                  error:pError];
             if (!session) {
@@ -109,7 +109,6 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
 + (void)initialize
 {
-    currentConfiguration = [SPDYConfiguration defaultConfiguration];
     reachabilityIsWWAN = NO;
 
 #if TARGET_OS_IPHONE
@@ -133,11 +132,6 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
         }
     });
 #endif
-}
-
-+ (void)setConfiguration:(SPDYConfiguration *)configuration
-{
-    currentConfiguration = [configuration copy];
 }
 
 + (SPDYSessionManager *)localManagerForOrigin:(SPDYOrigin *)origin
@@ -172,8 +166,8 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
         session = [*pool next];
         if (!session && !protocol.request.SPDYDeferrableInterval > 0) {
             *pool = [[SPDYSessionPool alloc] initWithOrigin:_origin
-                                                      size:currentConfiguration.sessionPoolSize
-                                                     error:pError];
+                                              configuration:[SPDYProtocol currentConfiguration]
+                                                      error:pError];
             if (*pool) {
                 session = [*pool next];
             }
