@@ -138,11 +138,16 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 {
     NSMutableDictionary *threadDictionary = [NSThread currentThread].threadDictionary;
     NSMutableDictionary *originDictionary = threadDictionary[SPDYSessionManagerKey];
+    if (!originDictionary) {
+        threadDictionary[SPDYSessionManagerKey] = [NSMutableDictionary new];
+    }
+
     SPDYSessionManager *manager = originDictionary[origin];
     if (!manager) {
         manager = [[SPDYSessionManager alloc] initWithOrigin:origin];
-        threadDictionary[SPDYSessionManagerKey] = manager;
+        originDictionary[origin] = manager;
     }
+
     return manager;
 }
 
@@ -158,25 +163,26 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
 - (void)queueRequest:(SPDYProtocol *)protocol error:(NSError **)pError
 {
+    SPDY_INFO(@"queueing request: %@", protocol.request.URL);
     *pError = nil;
-    SPDYSession *session;
-    SPDYSessionPool * __strong *pool = reachabilityIsWWAN ? &_wwanPool : &_basePool;
 
-    if (*pool) {
-        session = [*pool next];
-        if (!session && !protocol.request.SPDYDeferrableInterval > 0) {
-            *pool = [[SPDYSessionPool alloc] initWithOrigin:_origin
-                                              configuration:[SPDYProtocol currentConfiguration]
-                                                      error:pError];
-            if (*pool) {
-                session = [*pool next];
-            }
+    SPDYSessionPool * __strong *pool = reachabilityIsWWAN ? &_wwanPool : &_basePool;
+    SPDYSession *session = [*pool next];
+
+    if (!session && !protocol.request.SPDYDeferrableInterval > 0) {
+        *pool = [[SPDYSessionPool alloc] initWithOrigin:_origin
+                                          configuration:[SPDYProtocol currentConfiguration]
+                                                  error:pError];
+        if (*pool) {
+            session = [*pool next];
         }
     }
 
     if (session) {
+        SPDY_INFO(@"dispatching request: %@", protocol.request.URL);
         [session dispatchRequest:protocol];
     } else {
+        SPDY_INFO(@"deferring request: %@", protocol.request.URL);
         SPDYStream *stream = [[SPDYStream alloc] initWithProtocol:protocol];
         [_pendingStreams addStream:stream];
     }

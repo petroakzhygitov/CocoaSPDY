@@ -61,6 +61,5 @@
 @property (nonatomic) NSString *SPDYBodyFile;
 @property (nonatomic) NSTimeInterval SPDYDeferrableInterval;
 @property (nonatomic) NSUInteger SPDYPriority;
-@property (nonatomic) BOOL SPDYDiscretionary;
 @property (nonatomic) BOOL SPDYBypass;
 @end
