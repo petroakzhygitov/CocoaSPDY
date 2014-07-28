@@ -57,9 +57,9 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
 {
     __block SPDYConfiguration *configuration;
     dispatch_sync(configQueue, ^{
-        configuration = currentConfiguration;
+        configuration = [currentConfiguration copy];
     });
-    return [configuration copy];
+    return configuration;
 }
 
 + (void)setConfiguration:(SPDYConfiguration *)configuration

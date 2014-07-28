@@ -51,6 +51,7 @@
 - (void)_sendPingResponse:(SPDYPingFrame *)pingFrame;
 - (void)_sendRstStream:(SPDYStreamStatus)status streamId:(SPDYStreamId)streamId;
 - (void)_sendGoAway:(SPDYSessionStatus)status;
+- (void)_closeStream:(SPDYStream *)stream withError:(NSError*)error;
 @end
 
 @implementation SPDYSession
@@ -210,7 +211,7 @@
         [self _sendRstStream:SPDY_STREAM_CANCEL streamId:stream.streamId];
         stream.client = nil;
         [_activeStreams removeStreamForProtocol:protocol];
-        [_delegate session:self capacityIncreased:1];
+        [_delegate session:self capacityAvailable:1];
     }
 }
 
@@ -513,7 +514,7 @@
     stream.remoteSideClosed = dataFrame.last;
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        if (stream.local) [_delegate session:self capacityIncreased:self.capacity];
+        if (stream.local) [_delegate session:self capacityAvailable:self.capacity];
     }
 }
 
@@ -602,7 +603,7 @@
 
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityIncreased:self.capacity];
+        [_delegate session:self capacityAvailable:self.capacity];
     }
 }
 
@@ -630,7 +631,7 @@
         }
 
         [stream closeWithStatus:rstStreamFrame.statusCode];
-        if (stream.local) [_delegate session:self capacityIncreased:1];
+        if (stream.local) [_delegate session:self capacityAvailable:1];
     }
 }
 
@@ -654,6 +655,7 @@
     }
 
     bool persistSettings = NO;
+    bool capacityIncreased = NO;
 
     for (SPDYSettingsId i = _SPDY_SETTINGS_RANGE_START; !persistSettings && i < _SPDY_SETTINGS_RANGE_END; i++) {
         // Check if any settings need to be persisted before dispatching
@@ -664,7 +666,9 @@
     }
 
     if (settings[SPDY_SETTINGS_MAX_CONCURRENT_STREAMS].set) {
-        _remoteMaxConcurrentStreams = (uint32_t)MAX(settings[SPDY_SETTINGS_MAX_CONCURRENT_STREAMS].value, 0);
+        uint32_t newMaxConcurrentStreams = (uint32_t)MAX(settings[SPDY_SETTINGS_MAX_CONCURRENT_STREAMS].value, 0);
+        capacityIncreased = newMaxConcurrentStreams > newMaxConcurrentStreams;
+        _remoteMaxConcurrentStreams = newMaxConcurrentStreams;
     }
 
     if (settings[SPDY_SETTINGS_INITIAL_WINDOW_SIZE].set) {
@@ -680,7 +684,9 @@
         }
     }
 
-    [_delegate session:self capacityIncreased:?];
+    if (capacityIncreased) {
+        [_delegate session:self capacityAvailable:self.capacity];
+    }
 }
 
 - (void)didReadPingFrame:(SPDYPingFrame *)pingFrame frameDecoder:(SPDYFrameDecoder *)frameDecoder
@@ -745,7 +751,7 @@
     stream.remoteSideClosed = headersFrame.last;
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityIncreased:1];
+        [_delegate session:self capacityAvailable:1];
     }
 }
 
@@ -845,8 +851,13 @@
     synStreamFrame.last = close;
     synStreamFrame.headers = stream.protocol.request.allSPDYHeaderFields;
 
-    [_frameEncoder encodeSynStreamFrame:synStreamFrame];
-    SPDY_DEBUG(@"sent SYN_STREAM.%u%@",streamId, synStreamFrame.last ? @"!" : @"");
+    NSError *error;
+    if (![_frameEncoder encodeSynStreamFrame:synStreamFrame error:&error]) {
+        [self _closeStream:stream withError:error];
+        SPDY_ERROR(@"error encoding SYN_STREAM.%u%@",streamId, synStreamFrame.last ? @"!" : @"");
+    } else {
+        SPDY_DEBUG(@"sent SYN_STREAM.%u%@",streamId, synStreamFrame.last ? @"!" : @"");
+    }
 }
 
 - (void)_sendData:(SPDYStream *)stream
@@ -876,7 +887,7 @@
                 [self _sendRstStream:SPDY_STREAM_CANCEL streamId:streamId];
                 [stream closeWithError:error];
                 [_activeStreams removeStreamWithStreamId:streamId];
-                [_delegate session:self capacityIncreased:1];
+                [_delegate session:self capacityAvailable:1];
             }
 
             // -[SPDYStream hasDataAvailable] may return true if we need to perform
@@ -899,7 +910,7 @@
 
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityIncreased:1];
+        [_delegate session:self capacityAvailable:1];
     }
 }
 

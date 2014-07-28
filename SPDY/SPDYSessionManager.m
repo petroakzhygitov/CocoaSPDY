@@ -121,7 +121,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 @end
 
 @interface SPDYSessionManager () <SPDYSessionDelegate>
-- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity;
+- (void)session:(SPDYSession *)session capacityAvailable:(NSUInteger)capacity;
 - (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular;
 - (void)sessionClosed:(SPDYSession *)session;
 @end
@@ -232,7 +232,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
 #pragma mark SPDYSessionDelegate
 
-- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity
+- (void)session:(SPDYSession *)session capacityAvailable:(NSUInteger)capacity
 {
     [self _dispatchToSession:session count:capacity];
 }
