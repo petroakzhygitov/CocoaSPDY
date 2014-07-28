@@ -38,7 +38,10 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 #endif
 
 @interface SPDYSessionPool : NSObject
-- (id)initWithOrigin:(SPDYOrigin *)origin configuration:(SPDYConfiguration *)configuration error:(NSError **)pError;
+@property (nonatomic, assign, readonly) NSUInteger count;
+@property (nonatomic, assign) NSUInteger pendingCount;
+
+- (id)initWithOrigin:(SPDYOrigin *)origin manager:(SPDYSessionManager *)manager error:(NSError **)pError;
 - (NSUInteger)remove:(SPDYSession *)session;
 - (SPDYSession *)next;
 @end
@@ -48,14 +51,17 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     NSMutableArray *_sessions;
 }
 
-- (id)initWithOrigin:(SPDYOrigin *)origin configuration:(SPDYConfiguration *)configuration error:(NSError **)pError
+- (id)initWithOrigin:(SPDYOrigin *)origin manager:(SPDYSessionManager *)manager error:(NSError **)pError
 {
     self = [super init];
     if (self) {
+        SPDYConfiguration *configuration = [SPDYProtocol currentConfiguration];
         NSUInteger size = configuration.sessionPoolSize;
+        _pendingCount = size;
         _sessions = [[NSMutableArray alloc] initWithCapacity:size];
         for (NSUInteger i = 0; i < size; i++) {
             SPDYSession *session = [[SPDYSession alloc] initWithOrigin:origin
+                                                              delegate:manager
                                                          configuration:configuration
                                                               cellular:reachabilityIsWWAN
                                                                  error:pError];
@@ -66,6 +72,21 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
         }
     }
     return self;
+}
+
+- (bool)contains:(SPDYSession *)session
+{
+    return [_sessions containsObject:session];
+}
+
+- (void)add:(SPDYSession *)session
+{
+    [_sessions addObject:session];
+}
+
+- (NSUInteger)count
+{
+    return _sessions.count;
 }
 
 - (NSUInteger)remove:(SPDYSession *)session
@@ -99,12 +120,19 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
 @end
 
+@interface SPDYSessionManager () <SPDYSessionDelegate>
+- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity;
+- (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular;
+- (void)sessionClosed:(SPDYSession *)session;
+@end
+
 @implementation SPDYSessionManager
 {
     SPDYOrigin *_origin;
     SPDYSessionPool *_basePool;
     SPDYSessionPool *_wwanPool;
     SPDYStreamManager *_pendingStreams;
+    NSTimer *_dispatchTimer;
 }
 
 + (void)initialize
@@ -168,22 +196,22 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
     SPDYSessionPool * __strong *pool = reachabilityIsWWAN ? &_wwanPool : &_basePool;
     SPDYSession *session = [*pool next];
+    SPDYStream *stream = [[SPDYStream alloc] initWithProtocol:protocol];
 
     if (!session && !protocol.request.SPDYDeferrableInterval > 0) {
         *pool = [[SPDYSessionPool alloc] initWithOrigin:_origin
-                                          configuration:[SPDYProtocol currentConfiguration]
+                                                manager:self
                                                   error:pError];
         if (*pool) {
             session = [*pool next];
         }
     }
 
-    if (session) {
+    if (session && session.isConnected) {
         SPDY_INFO(@"dispatching request: %@", protocol.request.URL);
-        [session dispatchRequest:protocol];
+        [session openStream:stream];
     } else {
         SPDY_INFO(@"deferring request: %@", protocol.request.URL);
-        SPDYStream *stream = [[SPDYStream alloc] initWithProtocol:protocol];
         [_pendingStreams addStream:stream];
     }
 }
@@ -193,13 +221,57 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     [_pendingStreams removeStreamForProtocol:protocol];
 }
 
-- (void)removeSession:(SPDYSession *)session
+- (void)_dispatchToSession:(SPDYSession *)session count:(NSUInteger)count
 {
-    SPDY_DEBUG(@"Removing session: %@", session);
+    SPDYStream *stream;
+    for (int i = 0; i < count && session.capacity > 0 && (stream = [_pendingStreams nextPriorityStream]); i++) {
+        [_pendingStreams removeStreamForProtocol:stream.protocol];
+        [session openStream:stream];
+    }
+}
+
+#pragma mark SPDYSessionDelegate
+
+- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity
+{
+    [self _dispatchToSession:session count:capacity];
+}
+
+- (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular
+{
+    SPDYSessionPool *targetPool = cellular ? _wwanPool : _basePool;
+
+    if ([_basePool contains:session]) {
+        _basePool.pendingCount -= 1;
+        if (cellular) {
+            [_basePool remove:session];
+            [_wwanPool add:session];
+        }
+    } else if ([_wwanPool contains:session]) {
+        _wwanPool.pendingCount -= 1;
+        if (!cellular) {
+            [_wwanPool remove:session];
+            [_basePool add:session];
+        }
+    }
+
+    float holdback = 1 - (float)targetPool.pendingCount / targetPool.count;
+    [self _dispatchToSession:session count:(NSUInteger)(holdback * _pendingStreams.localCount + 0.5)];
+}
+
+- (void)sessionClosed:(SPDYSession *)session
+{
+    SPDY_DEBUG(@"session closed: %@", session);
     SPDYSessionPool * __strong *pool = session.isCellular ? &_wwanPool : &_basePool;
     if (*pool && [*pool remove:session] == 0) {
         *pool = nil;
     }
+}
+
+- (void)session:(SPDYSession *)session refusedStream:(SPDYStream *)stream
+{
+    SPDY_INFO(@"re-queueing request: %@", stream.protocol.request.URL);
+    [_pendingStreams addStream:stream];
 }
 
 @end

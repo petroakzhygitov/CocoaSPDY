@@ -59,7 +59,7 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
     dispatch_sync(configQueue, ^{
         configuration = currentConfiguration;
     });
-    return configuration;
+    return [configuration copy];
 }
 
 + (void)setConfiguration:(SPDYConfiguration *)configuration

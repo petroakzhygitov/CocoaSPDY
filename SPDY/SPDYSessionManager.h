@@ -22,6 +22,5 @@
 
 - (void)queueRequest:(SPDYProtocol *)protocol error:(NSError **)pError;
 - (void)cancelRequest:(SPDYProtocol *)protocol;
-- (void)removeSession:(SPDYSession *)session;
 
 @end

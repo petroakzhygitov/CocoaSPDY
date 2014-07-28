@@ -15,6 +15,8 @@
 @class SPDYProtocol;
 @class SPDYStream;
 
+// TODO: rework ownership and handle cancellation via stream delegate
+
 @protocol SPDYStreamDataDelegate <NSObject>
 - (void)streamDataAvailable:(SPDYStream *)stream;
 - (void)streamFinished:(SPDYStream *)stream;
