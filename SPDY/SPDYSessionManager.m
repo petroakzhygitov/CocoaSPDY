@@ -43,7 +43,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
 - (id)initWithOrigin:(SPDYOrigin *)origin manager:(SPDYSessionManager *)manager error:(NSError **)pError;
 - (NSUInteger)remove:(SPDYSession *)session;
-- (SPDYSession *)next;
+- (SPDYSession *)nextSession;
 @end
 
 @implementation SPDYSessionPool
@@ -95,19 +95,15 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     return _sessions.count;
 }
 
-- (SPDYSession *)next
+- (SPDYSession *)nextSession
 {
     SPDYSession *session;
 
-    // TODO: this nil check shouldn't be necessary, is there a threading issue?
     if (_sessions.count == 0) {
         return nil;
     }
 
-    do {
-        session = _sessions[0];
-    } while (session && !session.isOpen && [self remove:session] > 0);
-    if (!session.isOpen) return nil; // No open sessions in the pool
+    session = _sessions[0];
 
     // Rotate
     if (_sessions.count > 1) {
@@ -121,7 +117,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 @end
 
 @interface SPDYSessionManager () <SPDYSessionDelegate>
-- (void)session:(SPDYSession *)session capacityAvailable:(NSUInteger)capacity;
+- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity;
 - (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular;
 - (void)sessionClosed:(SPDYSession *)session;
 @end
@@ -195,7 +191,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     *pError = nil;
 
     SPDYSessionPool * __strong *pool = reachabilityIsWWAN ? &_wwanPool : &_basePool;
-    SPDYSession *session = [*pool next];
+    SPDYSession *session = [*pool nextSession];
     SPDYStream *stream = [[SPDYStream alloc] initWithProtocol:protocol];
 
     if (!session && !protocol.request.SPDYDeferrableInterval > 0) {
@@ -203,7 +199,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
                                                 manager:self
                                                   error:pError];
         if (*pool) {
-            session = [*pool next];
+            session = [*pool nextSession];
         }
     }
 
@@ -221,20 +217,38 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     [_pendingStreams removeStreamForProtocol:protocol];
 }
 
-- (void)_dispatchToSession:(SPDYSession *)session count:(NSUInteger)count
+- (void)_dispatch
 {
-    SPDYStream *stream;
-    for (int i = 0; i < count && session.capacity > 0 && (stream = [_pendingStreams nextPriorityStream]); i++) {
-        [_pendingStreams removeStreamForProtocol:stream.protocol];
-        [session openStream:stream];
+    if (_pendingStreams.count == 0) return;
+
+    SPDYSessionPool *activePool = reachabilityIsWWAN ? _wwanPool : _basePool;
+    SPDYSession *session;
+    double holdback = 1.0 / (activePool.pendingCount + 1);
+    double allocation = 1.0 - holdback;
+
+    for (int i = 0; _pendingStreams.count > 0 && i < activePool.count; i++) {
+        session = [activePool nextSession];
+        NSUInteger count = MIN(session.capacity, _pendingStreams.count);
+        if (count > 0) {
+            // Load-balance when a session has recently connected
+            if (!session.isEstablished) {
+                count = MIN(count, (NSUInteger)ceil(allocation * _pendingStreams.localCount - holdback * session.load));
+            }
+
+            for (int j = 0; j < count; j++) {
+                SPDYStream *stream = [_pendingStreams nextPriorityStream];
+                [_pendingStreams removeStreamForProtocol:stream.protocol];
+                [session openStream:stream];
+            }
+        }
     }
 }
 
 #pragma mark SPDYSessionDelegate
 
-- (void)session:(SPDYSession *)session capacityAvailable:(NSUInteger)capacity
+- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity
 {
-    [self _dispatchToSession:session count:capacity];
+    [self _dispatch];
 }
 
 - (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular
@@ -255,12 +269,12 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
         }
     }
 
-    float holdback = 1 - (float)targetPool.pendingCount / targetPool.count;
-    [self _dispatchToSession:session count:(NSUInteger)(holdback * _pendingStreams.localCount + 0.5)];
+    [self _dispatch];
 }
 
 - (void)sessionClosed:(SPDYSession *)session
 {
+    // TODO: confirm session closed is ALWAYS appropriately called since pools don't self cleanup anymore
     SPDY_DEBUG(@"session closed: %@", session);
     SPDYSessionPool * __strong *pool = session.isCellular ? &_wwanPool : &_basePool;
     if (*pool && [*pool remove:session] == 0) {

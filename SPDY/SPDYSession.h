@@ -19,7 +19,7 @@
 @class SPDYStream;
 
 @protocol SPDYSessionDelegate <NSObject>
-- (void)session:(SPDYSession *)session capacityAvailable:(NSUInteger)capacity;
+- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity;
 - (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular;
 - (void)session:(SPDYSession *)session refusedStream:(SPDYStream *)stream;
 - (void)sessionClosed:(SPDYSession *)session;
@@ -30,8 +30,10 @@
 @property (nonatomic, weak) id<SPDYSessionDelegate> delegate;
 @property (nonatomic, readonly) SPDYOrigin *origin;
 @property (nonatomic, assign, readonly) NSUInteger capacity;
+@property (nonatomic, assign, readonly) NSUInteger load;
 @property (nonatomic, readonly) bool isCellular;
 @property (nonatomic, readonly) bool isConnected;
+@property (nonatomic, readonly) bool isEstablished;
 @property (nonatomic, readonly) bool isOpen;
 
 - (id)initWithOrigin:(SPDYOrigin *)origin

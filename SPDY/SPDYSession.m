@@ -81,6 +81,7 @@
     bool _disconnected;
     bool _enableSettingsMinorVersion;
     bool _enableTCPNoDelay;
+    bool _established;
     bool _receivedGoAwayFrame;
     bool _sentGoAwayFrame;
 }
@@ -211,13 +212,18 @@
         [self _sendRstStream:SPDY_STREAM_CANCEL streamId:stream.streamId];
         stream.client = nil;
         [_activeStreams removeStreamForProtocol:protocol];
-        [_delegate session:self capacityAvailable:1];
+        [_delegate session:self capacityIncreased:1];
     }
 }
 
 - (NSUInteger)capacity
 {
-    return _connected * MAX(0, _remoteMaxConcurrentStreams - _activeStreams.localCount);
+    return (self.isOpen && _connected) * MAX(0, _remoteMaxConcurrentStreams - _activeStreams.localCount);
+}
+
+- (NSUInteger)load
+{
+    return _activeStreams.localCount;
 }
 
 - (void)dealloc
@@ -236,6 +242,11 @@
 - (bool)isConnected
 {
     return _connected;
+}
+
+- (bool)isEstablished
+{
+    return _established;
 }
 
 - (bool)isOpen
@@ -361,6 +372,7 @@
     _connected = NO;
     _disconnected = YES;
     [_delegate sessionClosed:self];
+    _delegate = nil;
 }
 
 #pragma mark SPDYStreamDataDelegate
@@ -514,7 +526,7 @@
     stream.remoteSideClosed = dataFrame.last;
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        if (stream.local) [_delegate session:self capacityAvailable:self.capacity];
+        if (stream.local) [_delegate session:self capacityIncreased:self.capacity];
     }
 }
 
@@ -603,7 +615,7 @@
 
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityAvailable:self.capacity];
+        [_delegate session:self capacityIncreased:self.capacity];
     }
 }
 
@@ -631,7 +643,7 @@
         }
 
         [stream closeWithStatus:rstStreamFrame.statusCode];
-        if (stream.local) [_delegate session:self capacityAvailable:1];
+        if (stream.local) [_delegate session:self capacityIncreased:1];
     }
 }
 
@@ -685,7 +697,7 @@
     }
 
     if (capacityIncreased) {
-        [_delegate session:self capacityAvailable:self.capacity];
+        [_delegate session:self capacityIncreased:self.capacity];
     }
 }
 
@@ -706,6 +718,7 @@
         if (pingId == 1) {
             _sessionLatency = CFAbsoluteTimeGetCurrent() - _sessionPingOut;
             SPDY_DEBUG(@"received PING.%u response (%f)", pingId, _sessionLatency);
+            _established = YES;
         }
     } else {
         [self _sendPingResponse:pingFrame];
@@ -732,6 +745,9 @@
         }
     }
 
+    [_delegate sessionClosed:self];
+    _delegate = nil;
+
     if (_activeStreams.count == 0) {
         [_socket disconnect];
     }
@@ -751,7 +767,7 @@
     stream.remoteSideClosed = headersFrame.last;
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityAvailable:1];
+        [_delegate session:self capacityIncreased:1];
     }
 }
 
@@ -887,7 +903,7 @@
                 [self _sendRstStream:SPDY_STREAM_CANCEL streamId:streamId];
                 [stream closeWithError:error];
                 [_activeStreams removeStreamWithStreamId:streamId];
-                [_delegate session:self capacityAvailable:1];
+                [_delegate session:self capacityIncreased:1];
             }
 
             // -[SPDYStream hasDataAvailable] may return true if we need to perform
@@ -910,7 +926,7 @@
 
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityAvailable:1];
+        [_delegate session:self capacityIncreased:1];
     }
 }
 
