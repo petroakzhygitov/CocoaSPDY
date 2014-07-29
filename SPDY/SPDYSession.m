@@ -525,7 +525,7 @@
     stream.remoteSideClosed = dataFrame.last;
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        if (stream.local) [_delegate session:self capacityIncreased:self.capacity];
+        if (stream.local) [_delegate session:self capacityIncreased:1];
     }
 }
 
@@ -614,7 +614,7 @@
 
     if (stream.closed) {
         [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityIncreased:self.capacity];
+        [_delegate session:self capacityIncreased:1];
     }
 }
 
@@ -667,6 +667,7 @@
 
     bool persistSettings = NO;
     bool capacityIncreased = NO;
+    NSUInteger maxConcurrentStreamsDelta = 0;
 
     for (SPDYSettingsId i = _SPDY_SETTINGS_RANGE_START; !persistSettings && i < _SPDY_SETTINGS_RANGE_END; i++) {
         // Check if any settings need to be persisted before dispatching
@@ -678,7 +679,8 @@
 
     if (settings[SPDY_SETTINGS_MAX_CONCURRENT_STREAMS].set) {
         uint32_t newMaxConcurrentStreams = (uint32_t)MAX(settings[SPDY_SETTINGS_MAX_CONCURRENT_STREAMS].value, 0);
-        capacityIncreased = newMaxConcurrentStreams > newMaxConcurrentStreams;
+        maxConcurrentStreamsDelta = newMaxConcurrentStreams - _remoteMaxConcurrentStreams;
+        capacityIncreased = newMaxConcurrentStreams > _remoteMaxConcurrentStreams;
         _remoteMaxConcurrentStreams = newMaxConcurrentStreams;
     }
 
@@ -696,7 +698,7 @@
     }
 
     if (capacityIncreased) {
-        [_delegate session:self capacityIncreased:self.capacity];
+        [_delegate session:self capacityIncreased:maxConcurrentStreamsDelta];
     }
 }
 
