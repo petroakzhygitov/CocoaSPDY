@@ -51,7 +51,6 @@
 - (void)_sendPingResponse:(SPDYPingFrame *)pingFrame;
 - (void)_sendRstStream:(SPDYStreamStatus)status streamId:(SPDYStreamId)streamId;
 - (void)_sendGoAway:(SPDYSessionStatus)status;
-- (void)_closeStream:(SPDYStream *)stream withError:(NSError*)error;
 @end
 
 @implementation SPDYSession
