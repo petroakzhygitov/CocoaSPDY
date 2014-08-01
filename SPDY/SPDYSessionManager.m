@@ -253,8 +253,6 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
 - (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular
 {
-    SPDYSessionPool *targetPool = cellular ? _wwanPool : _basePool;
-
     if ([_basePool contains:session]) {
         _basePool.pendingCount -= 1;
         if (cellular) {
