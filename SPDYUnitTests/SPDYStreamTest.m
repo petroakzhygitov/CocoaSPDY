@@ -17,12 +17,12 @@
 
 typedef void (^SPDYAsyncTestCallback)();
 
-@interface SPDYMockStreamDataDelegate : NSObject <SPDYStreamDataDelegate>
+@interface SPDYMockStreamDelegate : NSObject <SPDYStreamDelegate>
 @property (nonatomic, readonly) NSData *data;
 @property (nonatomic, copy) SPDYAsyncTestCallback callback;
 @end
 
-@implementation SPDYMockStreamDataDelegate
+@implementation SPDYMockStreamDelegate
 {
     NSMutableData *_data;
 }
@@ -41,7 +41,7 @@ typedef void (^SPDYAsyncTestCallback)();
     [_data appendData:[stream readData:10 error:nil]];
 }
 
-- (void)streamFinished:(SPDYStream *)stream
+- (void)streamDataFinished:(SPDYStream *)stream
 {
     _callback();
 }
@@ -78,13 +78,13 @@ static NSThread *_streamThread;
 
 - (void)testStreamingWithStream
 {
-    SPDYMockStreamDataDelegate *mockDataDelegate = [SPDYMockStreamDataDelegate new];
+    SPDYMockStreamDelegate *mockDelegate = [SPDYMockStreamDelegate new];
     SPDYStream *spdyStream = [SPDYStream new];
-    spdyStream.dataDelegate = mockDataDelegate;
+    spdyStream.delegate = mockDelegate;
     spdyStream.dataStream = [[NSInputStream alloc] initWithData:_uploadData];
 
     __block bool finished = NO;
-    mockDataDelegate.callback = ^{
+    mockDelegate.callback = ^{
         dispatch_async(dispatch_get_main_queue(), ^{
             finished = YES;
         });
@@ -107,7 +107,7 @@ static NSThread *_streamThread;
         [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
     }
 
-    STAssertTrue([mockDataDelegate.data isEqualToData:_uploadData], nil);
+    STAssertTrue([mockDelegate.data isEqualToData:_uploadData], nil);
 }
 
 @end

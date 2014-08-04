@@ -17,14 +17,15 @@
 
 // TODO: rework ownership and handle cancellation via stream delegate
 
-@protocol SPDYStreamDataDelegate <NSObject>
+@protocol SPDYStreamDelegate<NSObject>
 - (void)streamDataAvailable:(SPDYStream *)stream;
-- (void)streamFinished:(SPDYStream *)stream;
+- (void)streamDataFinished:(SPDYStream *)stream;
+- (void)streamClosed:(SPDYStream *)stream;
 @end
 
 @interface SPDYStream : NSObject
 @property (nonatomic, weak) id<NSURLProtocolClient> client;
-@property (nonatomic, weak) id<SPDYStreamDataDelegate> dataDelegate;
+@property (nonatomic, weak) id<SPDYStreamDelegate> delegate;
 @property (nonatomic) NSData *data;
 @property (nonatomic) NSInputStream *dataStream;
 @property (nonatomic, weak) NSURLRequest *request;

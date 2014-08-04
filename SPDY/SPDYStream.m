@@ -114,7 +114,7 @@
         return NO;
     }
 
-    _dataDelegate = nil;
+    _delegate = nil;
     if (_dataStream && (_runLoop || _runLoopRef)) {
         UNSCHEDULE_STREAM();
     }
@@ -428,9 +428,9 @@ static void SPDYStreamCFReadStreamCallback(CFReadStreamRef stream, CFStreamEvent
 
     CFOptionFlags closeEvents = kCFStreamEventErrorOccurred | kCFStreamEventEndEncountered;
     if (eventType & closeEvents) {
-        [_dataDelegate streamFinished:self];
+        [_delegate streamDataFinished:self];
     } else {
-        [_dataDelegate streamDataAvailable:self];
+        [_delegate streamDataAvailable:self];
     }
 }
 
@@ -445,9 +445,9 @@ static void SPDYStreamCFReadStreamCallback(CFReadStreamRef stream, CFStreamEvent
     }
 
     if (_dataStream.streamStatus >= NSStreamStatusAtEnd) {
-        [_dataDelegate streamFinished:self];
+        [_delegate streamDataFinished:self];
     } else {
-        [_dataDelegate streamDataAvailable:self];
+        [_delegate streamDataAvailable:self];
     }
 }
 

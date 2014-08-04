@@ -43,7 +43,7 @@
 - (void)setSession:(SPDYSession *)session;
 @end
 
-@interface SPDYSession () <SPDYFrameDecoderDelegate, SPDYFrameEncoderDelegate, SPDYStreamDataDelegate, SPDYSocketDelegate>
+@interface SPDYSession () <SPDYFrameDecoderDelegate, SPDYFrameEncoderDelegate, SPDYStreamDelegate, SPDYSocketDelegate>
 @property (nonatomic, readonly) SPDYStreamId nextStreamId;
 - (void)_sendSynStream:(SPDYStream *)stream streamId:(SPDYStreamId)streamId closeLocal:(bool)close;
 - (void)_sendData:(SPDYStream *)stream;
@@ -187,7 +187,7 @@
 - (void)openStream:(SPDYStream *)stream
 {
     SPDYStreamId streamId = [self nextStreamId];
-    stream.dataDelegate = self;
+    stream.delegate = self;
     stream.protocol.session = self;
     [stream startWithStreamId:streamId
                sendWindowSize:_initialSendWindowSize
@@ -263,9 +263,22 @@
     if (!_sentGoAwayFrame) {
         [self _sendGoAway:status];
     }
+
     for (SPDYStream *stream in _activeStreams) {
-        [self _sendRstStream:SPDY_STREAM_CANCEL streamId:stream.streamId];
-        [stream closeWithStatus:stream.local ? SPDY_STREAM_CANCEL : SPDY_STREAM_INTERNAL_ERROR];
+        SPDYStreamStatus streamStatus;
+        switch (status) {
+            case SPDY_SESSION_OK:
+                streamStatus = SPDY_STREAM_CANCEL;
+                break;
+            case SPDY_SESSION_PROTOCOL_ERROR:
+                streamStatus = SPDY_STREAM_PROTOCOL_ERROR;
+                break;
+            default:
+                streamStatus = SPDY_STREAM_INTERNAL_ERROR;
+        }
+
+        [self _sendRstStream:streamStatus streamId:stream.streamId];
+        [stream closeWithStatus:streamStatus];
     }
 
     [_activeStreams removeAllStreams];
@@ -382,7 +395,7 @@
     [self _sendData:stream];
 }
 
-- (void)streamFinished:(SPDYStream *)stream
+- (void)streamDataFinished:(SPDYStream *)stream
 {
     SPDY_DEBUG(@"request body stream finished");
     [self _sendData:stream];
@@ -870,8 +883,10 @@
 
     NSError *error;
     if (![_frameEncoder encodeSynStreamFrame:synStreamFrame error:&error]) {
-        [self _closeStream:stream withError:error];
         SPDY_ERROR(@"error encoding SYN_STREAM.%u%@",streamId, synStreamFrame.last ? @"!" : @"");
+        [stream closeWithError:error];
+        [_activeStreams removeStreamWithStreamId:stream.streamId];
+        [_delegate session:self capacityIncreased:1];
     } else {
         SPDY_DEBUG(@"sent SYN_STREAM.%u%@",streamId, synStreamFrame.last ? @"!" : @"");
     }
@@ -901,7 +916,7 @@
             stream.localSideClosed = dataFrame.last;
         } else {
             if (error) {
-                [self _sendRstStream:SPDY_STREAM_CANCEL streamId:streamId];
+                [self _sendRstStream:SPDY_STREAM_INTERNAL_ERROR streamId:streamId];
                 [stream closeWithError:error];
                 [_activeStreams removeStreamWithStreamId:streamId];
                 [_delegate session:self capacityIncreased:1];
