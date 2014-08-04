@@ -40,10 +40,15 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 @interface SPDYSessionPool : NSObject
 @property (nonatomic, assign, readonly) NSUInteger count;
 @property (nonatomic, assign) NSUInteger pendingCount;
-
 - (id)initWithOrigin:(SPDYOrigin *)origin manager:(SPDYSessionManager *)manager error:(NSError **)pError;
 - (NSUInteger)remove:(SPDYSession *)session;
 - (SPDYSession *)nextSession;
+@end
+
+@interface SPDYSessionManager () <SPDYSessionDelegate>
+- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity;
+- (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular;
+- (void)sessionClosed:(SPDYSession *)session;
 @end
 
 @implementation SPDYSessionPool
@@ -114,12 +119,6 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     return session;
 }
 
-@end
-
-@interface SPDYSessionManager () <SPDYSessionDelegate>
-- (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity;
-- (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular;
-- (void)sessionClosed:(SPDYSession *)session;
 @end
 
 @implementation SPDYSessionManager

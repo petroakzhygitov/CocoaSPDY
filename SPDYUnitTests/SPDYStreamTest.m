@@ -46,6 +46,11 @@ typedef void (^SPDYAsyncTestCallback)();
     _callback();
 }
 
+- (void)streamClosed:(SPDYStream *)stream
+{
+
+}
+
 @end
 
 @implementation SPDYStreamTest
