@@ -116,6 +116,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
         [_sessions addObject:session];
     }
 
+    NSAssert(session.isOpen, @"Should never return closed sessions.");
     return session;
 }
 
@@ -127,6 +128,7 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     SPDYSessionPool *_basePool;
     SPDYSessionPool *_wwanPool;
     SPDYStreamManager *_pendingStreams;
+    NSArray *_runLoopModes;
     NSTimer *_dispatchTimer;
 }
 
@@ -180,34 +182,46 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     if (self) {
         _origin = origin;
         _pendingStreams = [[SPDYStreamManager alloc] init];
+        NSString *currentMode = [[NSRunLoop currentRunLoop] currentMode];
+        if ([currentMode isEqual:NSDefaultRunLoopMode]) {
+            _runLoopModes = @[NSDefaultRunLoopMode];
+        } else {
+            _runLoopModes = @[NSDefaultRunLoopMode, currentMode];
+        }
     }
     return self;
 }
 
-- (void)queueRequest:(SPDYProtocol *)protocol error:(NSError **)pError
+- (void)queueRequest:(SPDYProtocol *)protocol
 {
     SPDY_INFO(@"queueing request: %@", protocol.request.URL);
-    *pError = nil;
-
-    SPDYSessionPool * __strong *pool = reachabilityIsWWAN ? &_wwanPool : &_basePool;
-    SPDYSession *session = [*pool nextSession];
     SPDYStream *stream = [[SPDYStream alloc] initWithProtocol:protocol];
+    [_pendingStreams addStream:stream];
 
-    if (!session && !protocol.request.SPDYDeferrableInterval > 0) {
-        *pool = [[SPDYSessionPool alloc] initWithOrigin:_origin
-                                                manager:self
-                                                  error:pError];
-        if (*pool) {
-            session = [*pool nextSession];
+    NSTimeInterval deferrableInterval = protocol.request.SPDYDeferrableInterval;
+    if (deferrableInterval > 0) {
+        CFAbsoluteTime maxDelayThreshold = CFAbsoluteTimeGetCurrent() + deferrableInterval;
+
+        if (!_dispatchTimer) {
+            _dispatchTimer = [NSTimer timerWithTimeInterval:deferrableInterval
+                                                     target:self
+                                                   selector:@selector(_dispatch)
+                                                   userInfo:nil
+                                                    repeats:NO];
+            for (NSString *runLoopMode in _runLoopModes) {
+                CFRunLoopAddTimer(CFRunLoopGetCurrent(), (__bridge CFRunLoopTimerRef)_dispatchTimer, (__bridge CFStringRef)runLoopMode);
+            }
+        } else {
+            CFAbsoluteTime currentDelayTreshold = CFRunLoopTimerGetNextFireDate((__bridge CFRunLoopTimerRef)_dispatchTimer);
+
+            if (currentDelayTreshold < CFAbsoluteTimeGetCurrent()) {
+                [self _dispatch];
+            } else if (maxDelayThreshold < currentDelayTreshold) {
+                CFRunLoopTimerSetNextFireDate((__bridge CFRunLoopTimerRef)_dispatchTimer, maxDelayThreshold);
+            }
         }
-    }
-
-    if (session && session.isConnected) {
-        SPDY_INFO(@"dispatching request: %@", protocol.request.URL);
-        [session openStream:stream];
     } else {
-        SPDY_INFO(@"deferring request: %@", protocol.request.URL);
-        [_pendingStreams addStream:stream];
+        [self _dispatch];
     }
 }
 
@@ -218,15 +232,33 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
 - (void)_dispatch
 {
+    if (_dispatchTimer) _dispatchTimer = nil;
     if (_pendingStreams.count == 0) return;
 
-    SPDYSessionPool *activePool = reachabilityIsWWAN ? _wwanPool : _basePool;
+    SPDYSessionPool * __strong *activePool = reachabilityIsWWAN ? &_wwanPool : &_basePool;
+
+    if (!*activePool || (*activePool).count == 0) {
+        NSError *pError;
+        *activePool = [[SPDYSessionPool alloc] initWithOrigin:_origin manager:self error:&pError];
+        if (pError) {
+            for (SPDYStream *stream in _pendingStreams) {
+                SPDYProtocol *protocol = stream.protocol;
+                [protocol.client URLProtocol:protocol didFailWithError:pError];
+            }
+            [_pendingStreams removeAllStreams];
+        }
+
+        return;
+    }
+
     SPDYSession *session;
-    double holdback = 1.0 / (activePool.pendingCount + 1);
+    double holdback = 1.0 / ((*activePool).pendingCount + 1);
     double allocation = 1.0 - holdback;
 
-    for (int i = 0; _pendingStreams.count > 0 && i < activePool.count; i++) {
-        session = [activePool nextSession];
+    for (int i = 0; _pendingStreams.count > 0 && i < (*activePool).count; i++) {
+        session = [*activePool nextSession];
+        if (!session.isConnected) continue;
+
         NSUInteger count = MIN(session.capacity, _pendingStreams.count);
         if (count > 0) {
             // Load-balance when a session has recently connected
@@ -271,7 +303,6 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 
 - (void)sessionClosed:(SPDYSession *)session
 {
-    // TODO: confirm session closed is ALWAYS appropriately called since pools don't self cleanup anymore
     SPDY_DEBUG(@"session closed: %@", session);
     SPDYSessionPool * __strong *pool = session.isCellular ? &_wwanPool : &_basePool;
     if (*pool && [*pool remove:session] == 0) {

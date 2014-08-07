@@ -186,6 +186,8 @@
 
 - (void)openStream:(SPDYStream *)stream
 {
+    NSAssert(_connected, @"Cannot open stream prior to connecting.");
+
     SPDYStreamId streamId = [self nextStreamId];
     stream.delegate = self;
     stream.protocol.session = self;

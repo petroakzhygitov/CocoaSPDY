@@ -117,7 +117,7 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
     SPDYOrigin *origin = [[SPDYOrigin alloc] initWithURL:request.URL error:&error];
     if (origin) {
         _manager = [SPDYSessionManager localManagerForOrigin:origin];
-        [_manager queueRequest:self error:&error];
+        [_manager queueRequest:self];
     }
 
     if (error) {

@@ -20,7 +20,7 @@
 
 + (SPDYSessionManager *)localManagerForOrigin:(SPDYOrigin *)origin;
 
-- (void)queueRequest:(SPDYProtocol *)protocol error:(NSError **)pError;
+- (void)queueRequest:(SPDYProtocol *)protocol;
 - (void)cancelRequest:(SPDYProtocol *)protocol;
 
 @end
