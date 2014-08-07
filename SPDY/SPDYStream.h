@@ -20,6 +20,7 @@
 @protocol SPDYStreamDelegate<NSObject>
 - (void)streamDataAvailable:(SPDYStream *)stream;
 - (void)streamDataFinished:(SPDYStream *)stream;
+@optional
 - (void)streamClosed:(SPDYStream *)stream;
 @end
 
