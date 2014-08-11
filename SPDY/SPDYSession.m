@@ -299,7 +299,7 @@
 - (void)socket:(SPDYSocket *)socket didConnectToHost:(NSString *)host port:(in_port_t)port
 {
     _lastSocketActivity = CFAbsoluteTimeGetCurrent();
-    SPDY_DEBUG(@"socket connected to %@:%u", host, port);
+    SPDY_INFO(@"session connected to %@ (%@:%u)", _origin, host, port);
 
     _connected = YES;
     [_delegate session:self connectedToNetwork:_cellular];
