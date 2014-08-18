@@ -15,13 +15,12 @@
 @class SPDYProtocol;
 @class SPDYStream;
 
-// TODO: rework ownership and handle cancellation via stream delegate
-
 @protocol SPDYStreamDelegate<NSObject>
-- (void)streamDataAvailable:(SPDYStream *)stream;
-- (void)streamDataFinished:(SPDYStream *)stream;
+- (void)streamCanceled:(SPDYStream *)stream;
 @optional
 - (void)streamClosed:(SPDYStream *)stream;
+- (void)streamDataAvailable:(SPDYStream *)stream;
+- (void)streamDataFinished:(SPDYStream *)stream;
 @end
 
 @interface SPDYStream : NSObject
@@ -49,6 +48,7 @@
 - (void)startWithStreamId:(SPDYStreamId)id sendWindowSize:(uint32_t)sendWindowSize receiveWindowSize:(uint32_t)receiveWindowSize;
 - (bool)reset;
 - (NSData *)readData:(NSUInteger)length error:(NSError **)pError;
+- (void)cancel;
 - (void)closeWithError:(NSError *)error;
 - (void)closeWithStatus:(SPDYStreamStatus)status;
 - (void)didReceiveResponse:(NSDictionary *)headers;

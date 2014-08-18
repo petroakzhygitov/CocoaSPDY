@@ -16,11 +16,8 @@
 @class SPDYStreamManager;
 
 @interface SPDYSessionManager : NSObject
-@property SPDYStreamManager *pendingStreams;
 
 + (SPDYSessionManager *)localManagerForOrigin:(SPDYOrigin *)origin;
-
-- (void)queueRequest:(SPDYProtocol *)protocol;
-- (void)cancelRequest:(SPDYProtocol *)protocol;
+- (void)queueStream:(SPDYStream *)stream;
 
 @end

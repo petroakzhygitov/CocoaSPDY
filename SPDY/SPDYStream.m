@@ -150,6 +150,11 @@
     _client = protocol.client;
 }
 
+- (void)cancel
+{
+    if (_delegate) [_delegate streamCanceled:self];
+}
+
 - (void)closeWithError:(NSError *)error
 {
     if (_client) {
@@ -159,29 +164,39 @@
         }
         [_client URLProtocol:_protocol didFailWithError:error];
     }
+    if (_delegate && [_delegate respondsToSelector:@selector(streamClosed:)]) {
+        [_delegate streamClosed:self];
+    }
 }
 
 - (void)closeWithStatus:(SPDYStreamStatus)status
 {
-    if (_client) {
-        NSError *error = SPDY_STREAM_ERROR((SPDYStreamError)status, @"SPDY stream closed.");
-        [_client URLProtocol:_protocol didFailWithError:error];
-    }
+    [self closeWithError:SPDY_STREAM_ERROR((SPDYStreamError)status, @"SPDY stream closed.")];
 }
 
 - (void)setLocalSideClosed:(bool)localSideClosed
 {
     _localSideClosed = localSideClosed;
-    if (_localSideClosed && _remoteSideClosed && _client) {
-        [_client URLProtocolDidFinishLoading:_protocol];
+    if (_localSideClosed && _remoteSideClosed) {
+        if (_client) {
+            [_client URLProtocolDidFinishLoading:_protocol];
+        }
+        if (_delegate && [_delegate respondsToSelector:@selector(streamClosed:)]) {
+            [_delegate streamClosed:self];
+        }
     }
 }
 
 - (void)setRemoteSideClosed:(bool)remoteSideClosed
 {
     _remoteSideClosed = remoteSideClosed;
-    if (_localSideClosed && _remoteSideClosed && _client) {
-        [_client URLProtocolDidFinishLoading:_protocol];
+    if (_localSideClosed && _remoteSideClosed) {
+        if (_client) {
+            [_client URLProtocolDidFinishLoading:_protocol];
+        }
+        if (_delegate && [_delegate respondsToSelector:@selector(streamClosed:)]) {
+            [_delegate streamClosed:self];
+        }
     }
 }
 

@@ -45,10 +45,11 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
 - (SPDYSession *)nextSession;
 @end
 
-@interface SPDYSessionManager () <SPDYSessionDelegate>
+@interface SPDYSessionManager () <SPDYSessionDelegate, SPDYStreamDelegate>
 - (void)session:(SPDYSession *)session capacityIncreased:(NSUInteger)capacity;
 - (void)session:(SPDYSession *)session connectedToNetwork:(bool)cellular;
 - (void)sessionClosed:(SPDYSession *)session;
+- (void)streamCanceled:(SPDYStream *)stream;
 @end
 
 @implementation SPDYSessionPool
@@ -192,13 +193,15 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     return self;
 }
 
-- (void)queueRequest:(SPDYProtocol *)protocol
+- (void)queueStream:(SPDYStream *)stream
 {
-    SPDY_INFO(@"queueing request: %@", protocol.request.URL);
-    SPDYStream *stream = [[SPDYStream alloc] initWithProtocol:protocol];
-    [_pendingStreams addStream:stream];
+    NSAssert(stream.protocol != nil, @"can only enqueue local streams");
 
-    NSTimeInterval deferrableInterval = protocol.request.SPDYDeferrableInterval;
+    SPDY_INFO(@"queueing request: %@", stream.request.URL);
+    [_pendingStreams addStream:stream];
+    stream.delegate = self;
+
+    NSTimeInterval deferrableInterval = stream.request.SPDYDeferrableInterval;
     if (deferrableInterval > 0) {
         CFAbsoluteTime maxDelayThreshold = CFAbsoluteTimeGetCurrent() + deferrableInterval;
 
@@ -225,10 +228,31 @@ static void SPDYReachabilityCallback(SCNetworkReachabilityRef target, SCNetworkR
     }
 }
 
-- (void)cancelRequest:(SPDYProtocol *)protocol
+#pragma mark SPDYStreamDelegate
+
+- (void)streamCanceled:(SPDYStream *)stream
 {
-    [_pendingStreams removeStreamForProtocol:protocol];
+    NSAssert(_pendingStreams[stream.protocol], @"stream delegate must be managing stream");
+
+    [_pendingStreams removeStreamForProtocol:stream.protocol];
 }
+
+- (void)streamClosed:(SPDYStream *)stream
+{
+    NSAssert(false, @"session manager must never manage open streams");
+}
+
+- (void)streamDataAvailable:(SPDYStream *)stream
+{
+    NSAssert(false, @"session manager must never manage open streams");
+}
+
+- (void)streamDataFinished:(SPDYStream *)stream
+{
+    NSAssert(false, @"session manager must never manage open streams");
+}
+
+#pragma mark private methods
 
 - (void)_dispatch
 {

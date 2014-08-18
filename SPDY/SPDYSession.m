@@ -205,18 +205,6 @@
     }
 }
 
-- (void)cancelRequest:(SPDYProtocol *)protocol
-{
-    SPDYStream *stream = _activeStreams[protocol];
-
-    if (stream) {
-        [self _sendRstStream:SPDY_STREAM_CANCEL streamId:stream.streamId];
-        stream.client = nil;
-        [_activeStreams removeStreamForProtocol:protocol];
-        [_delegate session:self capacityIncreased:1];
-    }
-}
-
 - (NSUInteger)capacity
 {
     return (self.isOpen && _connected) * MAX(0, _remoteMaxConcurrentStreams - _activeStreams.localCount);
@@ -374,6 +362,7 @@
     _lastSocketActivity = CFAbsoluteTimeGetCurrent();
     SPDY_WARNING(@"session connection error: %@", error);
     for (SPDYStream *stream in _activeStreams) {
+        stream.delegate = nil;
         [stream closeWithError:error];
     }
     [_activeStreams removeAllStreams];
@@ -387,20 +376,6 @@
     _disconnected = YES;
     [_delegate sessionClosed:self];
     _delegate = nil;
-}
-
-#pragma mark SPDYStreamDataDelegate
-
-- (void)streamDataAvailable:(SPDYStream *)stream
-{
-    SPDY_DEBUG(@"request body stream data available");
-    [self _sendData:stream];
-}
-
-- (void)streamDataFinished:(SPDYStream *)stream
-{
-    SPDY_DEBUG(@"request body stream finished");
-    [self _sendData:stream];
 }
 
 #pragma mark SPDYFrameEncoderDelegate
@@ -538,10 +513,6 @@
     [stream didLoadData:dataFrame.data];
 
     stream.remoteSideClosed = dataFrame.last;
-    if (stream.closed) {
-        [_activeStreams removeStreamWithStreamId:streamId];
-        if (stream.local) [_delegate session:self capacityIncreased:1];
-    }
 }
 
 - (void)didReadSynStreamFrame:(SPDYSynStreamFrame *)synStreamFrame frameDecoder:(SPDYFrameDecoder *)frameDecoder
@@ -626,11 +597,6 @@
     [stream didReceiveResponse:headers];
 
     stream.remoteSideClosed = synReplyFrame.last;
-
-    if (stream.closed) {
-        [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityIncreased:1];
-    }
 }
 
 - (void)didReadRstStreamFrame:(SPDYRstStreamFrame *)rstStreamFrame frameDecoder:(SPDYFrameDecoder *)frameDecoder
@@ -649,15 +615,12 @@
     SPDY_DEBUG(@"received RST_STREAM.%u (%u)", streamId, rstStreamFrame.statusCode);
 
     if (stream) {
-        [_activeStreams removeStreamWithStreamId:streamId];
-
         if (rstStreamFrame.statusCode == SPDY_STREAM_REFUSED_STREAM && [stream reset]) {
             [_delegate session:self refusedStream:stream];
             return;
         }
 
         [stream closeWithStatus:rstStreamFrame.statusCode];
-        if (stream.local) [_delegate session:self capacityIncreased:1];
     }
 }
 
@@ -781,10 +744,6 @@
     }
 
     stream.remoteSideClosed = headersFrame.last;
-    if (stream.closed) {
-        [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityIncreased:1];
-    }
 }
 
 - (void)didReadWindowUpdateFrame:(SPDYWindowUpdateFrame *)windowUpdateFrame frameDecoder:(SPDYFrameDecoder *)frameDecoder
@@ -831,6 +790,36 @@
     }
 
     stream.sendWindowSize += windowUpdateFrame.deltaWindowSize;
+    [self _sendData:stream];
+}
+
+#pragma mark SPDYStreamDelegate
+
+- (void)streamCanceled:(SPDYStream *)stream
+{
+    NSAssert(_activeStreams[stream.streamId], @"stream delegate must be managing stream");
+
+    [self _sendRstStream:SPDY_STREAM_CANCEL streamId:stream.streamId];
+    stream.client = nil;
+    [_activeStreams removeStreamForProtocol:stream.protocol];
+    [_delegate session:self capacityIncreased:1];
+}
+
+- (void)streamClosed:(SPDYStream *)stream
+{
+    [_activeStreams removeStreamWithStreamId:stream.streamId];
+    [_delegate session:self capacityIncreased:1];
+}
+
+- (void)streamDataAvailable:(SPDYStream *)stream
+{
+    SPDY_DEBUG(@"request body stream data available");
+    [self _sendData:stream];
+}
+
+- (void)streamDataFinished:(SPDYStream *)stream
+{
+    SPDY_DEBUG(@"request body stream finished");
     [self _sendData:stream];
 }
 
@@ -887,8 +876,6 @@
     if (![_frameEncoder encodeSynStreamFrame:synStreamFrame error:&error]) {
         SPDY_ERROR(@"error encoding SYN_STREAM.%u%@",streamId, synStreamFrame.last ? @"!" : @"");
         [stream closeWithError:error];
-        [_activeStreams removeStreamWithStreamId:stream.streamId];
-        [_delegate session:self capacityIncreased:1];
     } else {
         SPDY_DEBUG(@"sent SYN_STREAM.%u%@",streamId, synStreamFrame.last ? @"!" : @"");
     }
@@ -920,8 +907,6 @@
             if (error) {
                 [self _sendRstStream:SPDY_STREAM_INTERNAL_ERROR streamId:streamId];
                 [stream closeWithError:error];
-                [_activeStreams removeStreamWithStreamId:streamId];
-                [_delegate session:self capacityIncreased:1];
             }
 
             // -[SPDYStream hasDataAvailable] may return true if we need to perform
@@ -940,11 +925,6 @@
         SPDY_DEBUG(@"sent DATA.%u%@ (%lu)", streamId, dataFrame.last ? @"!" : @"", (unsigned long)dataFrame.data.length);
 
         stream.localSideClosed = YES;
-    }
-
-    if (stream.closed) {
-        [_activeStreams removeStreamWithStreamId:streamId];
-        [_delegate session:self capacityIncreased:1];
     }
 }
 

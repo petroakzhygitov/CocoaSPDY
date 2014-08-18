@@ -20,6 +20,7 @@
 #import "SPDYSessionManager.h"
 #import "SPDYTLSTrustEvaluator.h"
 #import "NSURLRequest+SPDYURLRequest.h"
+#import "SPDYStream.h"
 
 NSString *const SPDYStreamErrorDomain = @"SPDYStreamErrorDomain";
 NSString *const SPDYSessionErrorDomain = @"SPDYSessionErrorDomain";
@@ -34,8 +35,7 @@ static dispatch_queue_t configQueue;
 
 @implementation SPDYProtocol
 {
-    SPDYSessionManager *_manager;
-    SPDYSession *_session;
+    SPDYStream *_stream;
 }
 
 static SPDYConfiguration *currentConfiguration;
@@ -116,8 +116,9 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
     NSError *error;
     SPDYOrigin *origin = [[SPDYOrigin alloc] initWithURL:request.URL error:&error];
     if (origin) {
-        _manager = [SPDYSessionManager localManagerForOrigin:origin];
-        [_manager queueRequest:self];
+        SPDYSessionManager *manager = [SPDYSessionManager localManagerForOrigin:origin];
+        _stream = [[SPDYStream alloc] initWithProtocol:self];
+        [manager queueStream:_stream];
     }
 
     if (error) {
@@ -129,16 +130,9 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
 {
     SPDY_INFO(@"stop loading %@", self.request.URL.absoluteString);
 
-    if (_session) {
-        [_session cancelRequest:self];
-    } else if (_manager) {
-        [_manager cancelRequest:self];
+    if (_stream && !_stream.closed) {
+        [_stream cancel];
     }
-}
-
-- (void)setSession:(SPDYSession *)session
-{
-    _session = session;
 }
 
 @end

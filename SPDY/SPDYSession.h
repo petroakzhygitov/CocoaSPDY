@@ -42,7 +42,6 @@
             cellular:(bool)cellular
                error:(NSError **)pError;
 - (void)openStream:(SPDYStream *)stream;
-- (void)cancelRequest:(SPDYProtocol *)protocol;
 - (void)close;
 
 @end
