@@ -540,7 +540,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "IOS_ARMV7_LIB_PATH=\"${BUILD_DIR}/${CONFIGURATION}/lib${PROJECT_NAME}.iphoneos.a\" &&\nIOS_ARM64_LIB_PATH=\"${BUILD_DIR}/${CONFIGURATION}/lib${PROJECT_NAME}.iphoneos.arm64.a\" &&\nIOS_SIM_LIB_PATH=\"${BUILD_DIR}/${CONFIGURATION}/lib${PROJECT_NAME}.iphonesimulator.a\" &&\nOSX_LIB_PATH=\"${BUILD_DIR}/${CONFIGURATION}/lib${PROJECT_NAME}.macosx.a\" &&\nFRAMEWORK_PATH=\"${BUILD_DIR}/${CONFIGURATION}/${PRODUCT_NAME}.framework\" &&\n\nlipo \"${IOS_ARMV7_LIB_PATH}\" \"${IOS_ARM64_LIB_PATH}\" \"${IOS_SIM_LIB_PATH}\" \"${OSX_LIB_PATH}\" -create -output \"${FRAMEWORK_PATH}/Versions/A/${PRODUCT_NAME}\" &&\nln -fs \"Versions/Current/${PRODUCT_NAME}\" \"${FRAMEWORK_PATH}/${PRODUCT_NAME}\"\n";
+			shellScript = "IOS_LIB_PATH=\"${BUILD_DIR}/${CONFIGURATION}-iphoneos/lib${PROJECT_NAME}.iphoneos.a\"\nSIM_LIB_PATH=\"${BUILD_DIR}/${CONFIGURATION}-iphoneos/lib${PROJECT_NAME}.iphonesimulator.a\"\nOSX_LIB_PATH=\"${BUILD_DIR}/${CONFIGURATION}/lib${PROJECT_NAME}.macosx.a\"\nIOS_FRAMEWORK_PATH=\"${BUILD_DIR}/${CONFIGURATION}-iphoneos/${PRODUCT_NAME}.framework\"\nOSX_FRAMEWORK_PATH=\"${BUILD_DIR}/${CONFIGURATION}/${PRODUCT_NAME}.framework\"\n\ncp -fR \"${OSX_FRAMEWORK_PATH}\" \"${IOS_FRAMEWORK_PATH}\"\nlipo \"${IOS_LIB_PATH}\" \"${SIM_LIB_PATH}\" -create -output \"${IOS_FRAMEWORK_PATH}/Versions/A/${PRODUCT_NAME}\"\nlipo \"${OSX_LIB_PATH}\" -create -output \"${OSX_FRAMEWORK_PATH}/Versions/A/${PRODUCT_NAME}\"\nln -fs \"${IOS_FRAMEWORK_PATH}/Versions/Current/${PRODUCT_NAME}\" \"${IOS_FRAMEWORK_PATH}/${PRODUCT_NAME}\"\nln -fs \"${OSX_FRAMEWORK_PATH}/Versions/Current/${PRODUCT_NAME}\" \"${OSX_FRAMEWORK_PATH}/${PRODUCT_NAME}\"\n";
 		};
 		064EFB1116715C9F002F0AEC /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -740,6 +740,8 @@
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)/$(CONFIGURATION)-iphoneos";
+				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)/$(CONFIGURATION)-iphoneos";
 				DSTROOT = /tmp/SPDY_iphoneos.dst;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "SPDY.iphoneos/SPDY.iphoneos-Prefix.pch";
@@ -765,6 +767,8 @@
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)/$(CONFIGURATION)-iphoneos";
+				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)/$(CONFIGURATION)-iphoneos";
 				DSTROOT = /tmp/SPDY_iphoneos.dst;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "SPDY.iphoneos/SPDY.iphoneos-Prefix.pch";
@@ -790,6 +794,8 @@
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)/$(CONFIGURATION)-iphoneos";
+				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)/$(CONFIGURATION)-iphoneos";
 				DSTROOT = /tmp/SPDY_iphonesimulator.dst;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "SPDY.iphonesimulator/SPDY.iphonesimulator-Prefix.pch";
@@ -815,6 +821,8 @@
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CONFIGURATION_BUILD_DIR = "$(BUILD_DIR)/$(CONFIGURATION)-iphoneos";
+				CONFIGURATION_TEMP_DIR = "$(PROJECT_TEMP_DIR)/$(CONFIGURATION)-iphoneos";
 				DSTROOT = /tmp/SPDY_iphonesimulator.dst;
 				GCC_PRECOMPILE_PREFIX_HEADER = YES;
 				GCC_PREFIX_HEADER = "SPDY.iphonesimulator/SPDY.iphonesimulator-Prefix.pch";
