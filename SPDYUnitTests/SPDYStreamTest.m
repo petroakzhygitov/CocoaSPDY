@@ -46,9 +46,14 @@ typedef void (^SPDYAsyncTestCallback)();
     _callback();
 }
 
+- (void)streamCanceled:(SPDYStream *)stream
+{
+    // No-op
+}
+
 - (void)streamClosed:(SPDYStream *)stream
 {
-
+    // No-op
 }
 
 @end
@@ -88,11 +93,10 @@ static NSThread *_streamThread;
     spdyStream.delegate = mockDelegate;
     spdyStream.dataStream = [[NSInputStream alloc] initWithData:_uploadData];
 
-    __block bool finished = NO;
+    dispatch_semaphore_t main = dispatch_semaphore_create(0);
+    dispatch_semaphore_t alt = dispatch_semaphore_create(0);
     mockDelegate.callback = ^{
-        dispatch_async(dispatch_get_main_queue(), ^{
-            finished = YES;
-        });
+        dispatch_semaphore_signal(main);
     };
 
     STAssertTrue([NSThread isMainThread], @"dispatch must occur from main thread");
@@ -102,14 +106,15 @@ static NSThread *_streamThread;
         [spdyStream startWithStreamId:1 sendWindowSize:1024 receiveWindowSize:1024];
 
         // Run off-thread runloop
-        while(!finished) {
-            [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
+        while(dispatch_semaphore_wait(main, DISPATCH_TIME_NOW)) {
+            CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, YES);
         }
+        dispatch_semaphore_signal(alt);
     });
 
     // Run main thread runloop
-    while(!finished) {
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate distantFuture]];
+    while(dispatch_semaphore_wait(alt, DISPATCH_TIME_NOW)) {
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0, YES);
     }
 
     STAssertTrue([mockDelegate.data isEqualToData:_uploadData], nil);

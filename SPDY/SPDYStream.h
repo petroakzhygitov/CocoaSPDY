@@ -13,7 +13,10 @@
 #import "SPDYDefinitions.h"
 
 @class SPDYProtocol;
+@class SPDYMetadata;
 @class SPDYStream;
+
+@protocol SPDYExtendedDelegate;
 
 @protocol SPDYStreamDelegate<NSObject>
 - (void)streamCanceled:(SPDYStream *)stream;
@@ -26,6 +29,8 @@
 @interface SPDYStream : NSObject
 @property (nonatomic, weak) id<NSURLProtocolClient> client;
 @property (nonatomic, weak) id<SPDYStreamDelegate> delegate;
+@property (nonatomic, weak) id<SPDYExtendedDelegate> extendedDelegate;
+@property (nonatomic) SPDYMetadata *metadata;
 @property (nonatomic) NSData *data;
 @property (nonatomic) NSInputStream *dataStream;
 @property (nonatomic, weak) NSURLRequest *request;
@@ -50,7 +55,6 @@
 - (NSData *)readData:(NSUInteger)length error:(NSError **)pError;
 - (void)cancel;
 - (void)closeWithError:(NSError *)error;
-- (void)closeWithStatus:(SPDYStreamStatus)status;
-- (void)didReceiveResponse:(NSDictionary *)headers;
-- (void)didLoadData:(NSData *)data;
+- (bool)didReceiveResponse:(NSDictionary *)headers error:(NSError **)pError;
+- (bool)didLoadData:(NSData *)data error:(NSError **)pError;
 @end

@@ -11,6 +11,13 @@
 
 #import <SenTestingKit/SenTestingKit.h>
 #import "NSURLRequest+SPDYURLRequest.h"
+#import "SPDYProtocol.h"
+
+@interface TestSPDYRequestDelegate : NSObject <SPDYExtendedDelegate>
+@end
+
+@implementation TestSPDYRequestDelegate
+@end
 
 @interface SPDYURLRequestTest : SenTestCase
 @end
@@ -22,6 +29,14 @@ NSDictionary* GetHeadersFromRequest(NSString *urlString)
     NSURL *url = [[NSURL alloc] initWithString:urlString];
     NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
     return [request allSPDYHeaderFields];
+}
+
+NSMutableURLRequest* GetRequest(NSString *urlString, NSString *httpMethod)
+{
+    NSURL *url = [[NSURL alloc] initWithString:urlString];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
+    [request setHTTPMethod:httpMethod];
+    return request;
 }
 
 - (void)testAllSPDYHeaderFields
@@ -81,9 +96,7 @@ NSDictionary* GetHeadersFromRequest(NSString *urlString)
 - (void)testContentTypeHeaderDefaultForPost
 {
     // Ensure SPDY adds a default content-type when request is a POST with body.
-    NSURL *url = [[NSURL alloc] initWithString:@"http://example.com/test/path"];
-    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
-    [request setHTTPMethod:@"POST"];
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"POST");
     [request setSPDYBodyFile:@"bodyfile.json"];
 
     NSDictionary *headers = [request allSPDYHeaderFields];
@@ -94,15 +107,116 @@ NSDictionary* GetHeadersFromRequest(NSString *urlString)
 - (void)testContentTypeHeaderCustomForPost
 {
     // Ensure we can also override the default content-type.
-    NSURL *url = [[NSURL alloc] initWithString:@"http://example.com/test/path"];
-    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
-    [request setHTTPMethod:@"POST"];
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"POST");
     [request setSPDYBodyFile:@"bodyfile.json"];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
 
     NSDictionary *headers = [request allSPDYHeaderFields];
     STAssertEqualObjects(headers[@":method"], @"POST", nil);
     STAssertEqualObjects(headers[@"content-type"], @"application/json", nil);
+}
+
+- (void)testContentLengthHeaderDefaultForPostWithHTTPBody
+{
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"POST");
+    NSData *data = [@"Hello World" dataUsingEncoding:NSUTF8StringEncoding];
+    [request setHTTPBody:data];
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"content-length"], [@(data.length) stringValue], nil);
+}
+
+- (void)testContentLengthHeaderDefaultForPostWithInvalidSPDYBodyFile
+{
+    // An invalid body file will result in a size of 0
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"POST");
+    [request setSPDYBodyFile:@"doesnotexist.json"];
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"content-length"], @"0", nil);
+}
+
+- (void)testContentLengthHeaderDefaultForPostWithSPDYBodyStream
+{
+    // No default for input streams
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"POST");
+    NSData *data = [@"Hello World" dataUsingEncoding:NSUTF8StringEncoding];
+    NSInputStream *dataStream = [NSInputStream inputStreamWithData:data];
+    [request setSPDYBodyStream:dataStream];
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"content-length"], nil, nil);
+}
+
+- (void)testContentLengthHeaderCustomForPostWithSPDYBodyStream
+{
+    // No default for input streams
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"POST");
+    NSData *data = [@"Hello World" dataUsingEncoding:NSUTF8StringEncoding];
+    NSInputStream *dataStream = [NSInputStream inputStreamWithData:data];
+    [request setSPDYBodyStream:dataStream];
+    [request setValue:@"12" forHTTPHeaderField:@"Content-Length"];
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"content-length"], @"12", nil);
+}
+
+- (void)testContentLengthHeaderCustomForPostWithHTTPBody
+{
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"POST");
+    NSData *data = [@"Hello World" dataUsingEncoding:NSUTF8StringEncoding];
+    [request setHTTPBody:data];
+    [request setValue:@"1" forHTTPHeaderField:@"Content-Length"];
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"content-length"], @"1", nil);
+}
+
+- (void)testContentLengthHeaderDefaultForPutWithHTTPBody
+{
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"PUT");
+    NSData *data = [@"Hello World" dataUsingEncoding:NSUTF8StringEncoding];
+    [request setHTTPBody:data];
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"content-length"], [@(data.length) stringValue], nil);
+}
+
+- (void)testContentLengthHeaderDefaultForGet
+{
+    // Unusual but not explicitly disallowed
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"GET");
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"content-length"], nil, nil);
+}
+
+- (void)testContentLengthHeaderDefaultForGetWithHTTPBody
+{
+    // Unusual but not explicitly disallowed
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"GET");
+    NSData *data = [@"Hello World" dataUsingEncoding:NSUTF8StringEncoding];
+    [request setHTTPBody:data];
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"content-length"], [@(data.length) stringValue], nil);
+}
+
+- (void)testAcceptEncodingHeaderDefault
+{
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"GET");
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"accept-encoding"], @"gzip, deflate", nil);
+}
+
+- (void)testAcceptEncodingHeaderCustom
+{
+    NSMutableURLRequest *request = GetRequest(@"http://example.com/test/path", @"GET");
+    [request setValue:@"bogus" forHTTPHeaderField:@"Accept-Encoding"];
+
+    NSDictionary *headers = [request allSPDYHeaderFields];
+    STAssertEqualObjects(headers[@"accept-encoding"], @"bogus", nil);
 }
 
 - (void)testPathHeaderWithQueryString
@@ -163,7 +277,7 @@ NSDictionary* GetHeadersFromRequest(NSString *urlString)
 {
     NSURL *url = [[NSURL alloc] initWithString:@"http://example.com/test/path"];
     NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
-    NSInputStream *stream = [[NSInputStream alloc] init];
+    NSInputStream *stream = [[NSInputStream alloc] initWithData:[NSData new]];
 
     request.SPDYPriority = 1;
     request.SPDYDeferrableInterval = 3.95;
@@ -177,13 +291,127 @@ NSDictionary* GetHeadersFromRequest(NSString *urlString)
     STAssertEquals(request.SPDYBodyStream, stream, nil);
     STAssertEquals(request.SPDYBodyFile, @"Bodyfile.json", nil);
 
-    NSMutableURLRequest *requestCopy = [request mutableCopy];
+    NSMutableURLRequest *mutableCopy = [request mutableCopy];
 
-    STAssertEquals(requestCopy.SPDYPriority, (NSUInteger)1, nil);
-    STAssertEquals(requestCopy.SPDYDeferrableInterval, (double)3.95, nil);
-    STAssertEquals(requestCopy.SPDYBypass, (BOOL)YES, nil);
-    STAssertEquals(requestCopy.SPDYBodyStream, stream, nil);
-    STAssertEquals(requestCopy.SPDYBodyFile, @"Bodyfile.json", nil);
+    STAssertEquals(mutableCopy.SPDYPriority, (NSUInteger)1, nil);
+    STAssertEquals(mutableCopy.SPDYDeferrableInterval, (double)3.95, nil);
+    STAssertEquals(mutableCopy.SPDYBypass, (BOOL)YES, nil);
+    STAssertEquals(mutableCopy.SPDYBodyStream, stream, nil);
+    STAssertEquals(mutableCopy.SPDYBodyFile, @"Bodyfile.json", nil);
+
+    NSURLRequest *immutableCopy = [request copy];
+
+    STAssertEquals(immutableCopy.SPDYPriority, (NSUInteger)1, nil);
+    STAssertEquals(immutableCopy.SPDYDeferrableInterval, (double)3.95, nil);
+    STAssertEquals(immutableCopy.SPDYBypass, (BOOL)TRUE, nil);
+    STAssertEquals(immutableCopy.SPDYBodyStream, stream, nil);
+    STAssertEquals(immutableCopy.SPDYBodyFile, @"Bodyfile.json", nil);
 }
+
+- (void)testSPDYDelegateRunLoopProperties
+{
+    // Test getters/setters for all custom properties to catch any typos
+    NSURL *url = [[NSURL alloc] initWithString:@"http://example.com/test/path"];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
+
+    TestSPDYRequestDelegate *testDelegate = [[TestSPDYRequestDelegate alloc] init];
+    NSRunLoop *runLoop = [NSRunLoop mainRunLoop];
+    NSString *runLoopMode = @"testmode";
+
+    [request setExtendedDelegate:testDelegate inRunLoop:runLoop forMode:runLoopMode];
+    STAssertEquals([request SPDYDelegate], testDelegate, nil);
+    STAssertEquals([request SPDYDelegateRunLoop], runLoop, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoopMode], runLoopMode, nil);
+    STAssertEqualObjects([request SPDYDelegateQueue], nil, nil);
+
+    // Test the immutable versions
+    NSURLRequest *immutableRequest = request;
+    STAssertEquals([immutableRequest SPDYDelegate], testDelegate, nil);
+    STAssertEquals([immutableRequest SPDYDelegateRunLoop], runLoop, nil);
+    STAssertEqualObjects([immutableRequest SPDYDelegateRunLoopMode], runLoopMode, nil);
+    STAssertEqualObjects([immutableRequest SPDYDelegateQueue], nil, nil);
+}
+
+- (void)testSPDYDelegateDefaultRunLoopProperties
+{
+    // Test getters/setters for all custom properties to catch any typos
+    NSURL *url = [[NSURL alloc] initWithString:@"http://example.com/test/path"];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
+
+    TestSPDYRequestDelegate *testDelegate = [[TestSPDYRequestDelegate alloc] init];
+    NSRunLoop *runLoop = [NSRunLoop currentRunLoop];
+    NSString *runLoopMode = NSDefaultRunLoopMode;
+
+    [request setExtendedDelegate:testDelegate inRunLoop:nil forMode:nil];
+    STAssertEquals([request SPDYDelegate], testDelegate, nil);
+    STAssertEquals([request SPDYDelegateRunLoop], runLoop, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoopMode], runLoopMode, nil);
+    STAssertEqualObjects([request SPDYDelegateQueue], nil, nil);
+}
+
+- (void)testSPDYDelegateQueueProperties
+{
+    // Test getters/setters for all custom properties to catch any typos
+    NSURL *url = [[NSURL alloc] initWithString:@"http://example.com/test/path"];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
+
+    TestSPDYRequestDelegate *testDelegate = [[TestSPDYRequestDelegate alloc] init];
+    NSOperationQueue *queue = [NSOperationQueue mainQueue];
+
+    [request setExtendedDelegate:testDelegate queue:queue];
+    STAssertEquals([request SPDYDelegate], testDelegate, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoop], nil, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoopMode], nil, nil);
+    STAssertEquals([request SPDYDelegateQueue], queue, nil);
+
+    // Test the immutable versions
+    NSURLRequest *immutableRequest = request;
+    STAssertEquals([immutableRequest SPDYDelegate], testDelegate, nil);
+    STAssertEqualObjects([immutableRequest SPDYDelegateRunLoop], nil, nil);
+    STAssertEqualObjects([immutableRequest SPDYDelegateRunLoopMode], nil, nil);
+    STAssertEquals([immutableRequest SPDYDelegateQueue], queue, nil);
+}
+
+- (void)testSPDYDelegateDefaultQueueProperties
+{
+    // Test getters/setters for all custom properties to catch any typos
+    NSURL *url = [[NSURL alloc] initWithString:@"http://example.com/test/path"];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
+
+    TestSPDYRequestDelegate *testDelegate = [[TestSPDYRequestDelegate alloc] init];
+    NSOperationQueue *queue = [NSOperationQueue currentQueue];
+
+    [request setExtendedDelegate:testDelegate queue:nil];
+    STAssertEquals([request SPDYDelegate], testDelegate, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoop], nil, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoopMode], nil, nil);
+    STAssertEquals([request SPDYDelegateQueue], queue, nil);
+}
+
+- (void)testSPDYDelegateSwitchRunLoopAndQueueProperties
+{
+    // Test getters/setters for all custom properties to catch any typos
+    NSURL *url = [[NSURL alloc] initWithString:@"http://example.com/test/path"];
+    NSMutableURLRequest *request = [[NSMutableURLRequest alloc] initWithURL:url];
+
+    TestSPDYRequestDelegate *testDelegate = [[TestSPDYRequestDelegate alloc] init];
+    NSOperationQueue *queue = [NSOperationQueue currentQueue];
+    NSRunLoop *runLoop = [NSRunLoop currentRunLoop];
+    NSString *runLoopMode = NSDefaultRunLoopMode;
+
+    [request setExtendedDelegate:testDelegate inRunLoop:nil forMode:nil];
+    [request setExtendedDelegate:testDelegate queue:nil];
+    STAssertEquals([request SPDYDelegate], testDelegate, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoop], nil, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoopMode], nil, nil);
+    STAssertEquals([request SPDYDelegateQueue], queue, nil);
+
+    // And back
+    [request setExtendedDelegate:testDelegate inRunLoop:runLoop forMode:runLoopMode];
+    STAssertEquals([request SPDYDelegateRunLoop], runLoop, nil);
+    STAssertEqualObjects([request SPDYDelegateRunLoopMode], runLoopMode, nil);
+    STAssertEqualObjects([request SPDYDelegateQueue], nil, nil);
+}
+
 
 @end

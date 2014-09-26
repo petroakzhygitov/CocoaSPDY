@@ -19,6 +19,7 @@
 #import "SPDYError.h"
 #import "SPDYProtocol.h"
 #import "SPDYStream.h"
+#import "SPDYMetadata.h"
 
 #define DECOMPRESSED_CHUNK_LENGTH 8192
 #define MIN_WRITE_CHUNK_LENGTH 4096
@@ -43,6 +44,7 @@
 
 @implementation SPDYStream
 {
+    SPDYMetadata *_metadata;
     NSData *_data;
     NSString *_dataFile;
     NSInputStream *_dataStream;
@@ -72,6 +74,8 @@
         _remoteSideClosed = NO;
         _compressedResponse = NO;
         _receivedReply = NO;
+        _extendedDelegate = _request.SPDYDelegate;
+        _metadata = [[SPDYMetadata alloc] init];
     }
     return self;
 }
@@ -79,6 +83,7 @@
 - (void)startWithStreamId:(SPDYStreamId)streamId sendWindowSize:(uint32_t)sendWindowSize receiveWindowSize:(uint32_t)receiveWindowSize
 {
     _streamId = streamId;
+    _metadata.streamId = streamId;
     _sendWindowSize = sendWindowSize;
     _receiveWindowSize = receiveWindowSize;
     _sendWindowSizeLowerBound = 0;
@@ -144,12 +149,6 @@
     _dataStreamRef = (__bridge CFReadStreamRef)dataStream;
 }
 
-- (void)setProtocol:(SPDYProtocol *)protocol
-{
-    _protocol = protocol;
-    _client = protocol.client;
-}
-
 - (void)cancel
 {
     if (_delegate) [_delegate streamCanceled:self];
@@ -157,47 +156,79 @@
 
 - (void)closeWithError:(NSError *)error
 {
+    _localSideClosed = YES;
+    _remoteSideClosed = YES;
+
+    if (_extendedDelegate &&
+        [_extendedDelegate respondsToSelector:@selector(requestDidCompleteWithMetadata:)]) {
+        [self _fireMetadataCallback];
+    }
+
     if (_client) {
-        // Failing to pass an error here leads to null pointer exception
+        // Failing to pass an error leads to null pointer exception
         if (!error) {
             error = SPDY_SOCKET_ERROR(SPDYSocketTransportError, @"Unknown socket error.");
         }
         [_client URLProtocol:_protocol didFailWithError:error];
-    }
+    };
+
     if (_delegate && [_delegate respondsToSelector:@selector(streamClosed:)]) {
         [_delegate streamClosed:self];
     }
 }
 
-- (void)closeWithStatus:(SPDYStreamStatus)status
-{
-    [self closeWithError:SPDY_STREAM_ERROR((SPDYStreamError)status, @"SPDY stream closed.")];
-}
-
 - (void)setLocalSideClosed:(bool)localSideClosed
 {
     _localSideClosed = localSideClosed;
+
     if (_localSideClosed && _remoteSideClosed) {
-        if (_client) {
-            [_client URLProtocolDidFinishLoading:_protocol];
-        }
-        if (_delegate && [_delegate respondsToSelector:@selector(streamClosed:)]) {
-            [_delegate streamClosed:self];
-        }
+        [self _close];
     }
 }
 
 - (void)setRemoteSideClosed:(bool)remoteSideClosed
 {
     _remoteSideClosed = remoteSideClosed;
+
     if (_localSideClosed && _remoteSideClosed) {
-        if (_client) {
-            [_client URLProtocolDidFinishLoading:_protocol];
-        }
-        if (_delegate && [_delegate respondsToSelector:@selector(streamClosed:)]) {
-            [_delegate streamClosed:self];
-        }
+        [self _close];
     }
+}
+
+- (void)_close
+{
+    if (_extendedDelegate &&
+        [_extendedDelegate respondsToSelector:@selector(requestDidCompleteWithMetadata:)]) {
+        [self _fireMetadataCallback];
+    }
+
+    if (_client) {
+        [_client URLProtocolDidFinishLoading:_protocol];
+    }
+
+    if (_delegate && [_delegate respondsToSelector:@selector(streamClosed:)]) {
+        [_delegate streamClosed:self];
+    }
+}
+
+- (void)_fireMetadataCallback
+{
+    NSAssert(_request.SPDYDelegateRunLoop || _request.SPDYDelegateQueue,
+             @"callback requires SPDYDelegateRunLoop or SPDYDelegateQueue to be set");
+
+        void (^callback)(void) = ^{
+            [_extendedDelegate requestDidCompleteWithMetadata:[_metadata dictionary]];
+        };
+
+        if (_request.SPDYDelegateRunLoop != nil) {
+            CFRunLoopPerformBlock(
+                [_request.SPDYDelegateRunLoop getCFRunLoop],
+                (__bridge CFStringRef)_request.SPDYDelegateRunLoopMode,
+                callback
+            );
+        } else if (_request.SPDYDelegateQueue != nil) {
+            [_request.SPDYDelegateQueue addOperationWithBlock:callback];
+        }
 }
 
 - (bool)closed
@@ -271,28 +302,26 @@
     return nil;
 }
 
-- (void)didReceiveResponse:(NSDictionary *)headers
+- (bool)didReceiveResponse:(NSDictionary *)headers error:(NSError **)pError
 {
     _receivedReply = YES;
 
     NSInteger statusCode = [headers[@":status"] intValue];
     if (statusCode < 100 || statusCode > 599) {
         NSDictionary *info = @{ NSLocalizedDescriptionKey: @"invalid http response code" };
-        NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
-                                                    code:NSURLErrorBadServerResponse
-                                                userInfo:info];
-        [_client URLProtocol:_protocol didFailWithError:error];
-        return;
+        *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+                                             code:NSURLErrorBadServerResponse
+                                         userInfo:info];
+        return NO;
     }
 
     NSString *version = headers[@":version"];
     if (!version) {
         NSDictionary *info = @{ NSLocalizedDescriptionKey: @"response missing version header" };
-        NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
-                                                    code:NSURLErrorBadServerResponse
-                                                userInfo:info];
-        [_client URLProtocol:_protocol didFailWithError:error];
-        return;
+        *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+                                             code:NSURLErrorBadServerResponse
+                                         userInfo:info];
+        return NO;
     }
 
     NSMutableDictionary *allHTTPHeaders = [[NSMutableDictionary alloc] init];
@@ -345,11 +374,10 @@
     if (location != nil) {
         NSURL *redirectURL = [[NSURL alloc] initWithString:location relativeToURL:requestURL];
         if (redirectURL == nil) {
-            NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
-                                                        code:NSURLErrorRedirectToNonExistentLocation
-                                                    userInfo:nil];
-            [_client URLProtocol:_protocol didFailWithError:error];
-            return;
+            *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+                                                 code:NSURLErrorRedirectToNonExistentLocation
+                                             userInfo:nil];
+            return NO;
         }
 
         NSMutableURLRequest *redirect = [_protocol.request mutableCopy];
@@ -362,18 +390,19 @@
         }
 
         [_client URLProtocol:_protocol wasRedirectedToRequest:redirect redirectResponse:response];
-        return;
+        return YES;
     }
 
     [_client URLProtocol:_protocol
           didReceiveResponse:response
           cacheStoragePolicy:NSURLCacheStorageAllowed];
+    return YES;
 }
 
-- (void)didLoadData:(NSData *)data
+- (bool)didLoadData:(NSData *)data error:(NSError **)pError
 {
     NSUInteger dataLength = data.length;
-    if (dataLength == 0) return;
+    if (dataLength == 0) return YES;  // nothing to do, but not an error
 
     if (_compressedResponse) {
         _zlibStream.avail_in = (uInt)dataLength;
@@ -383,11 +412,10 @@
             uint8_t *inflatedBytes = malloc(sizeof(uint8_t) * DECOMPRESSED_CHUNK_LENGTH);
             if (inflatedBytes == NULL) {
                 SPDY_ERROR(@"error decompressing response data: malloc failed");
-                NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
-                                                            code:NSURLErrorCannotDecodeContentData
-                                                        userInfo:nil];
-                [_client URLProtocol:_protocol didFailWithError:error];
-                return;
+                *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+                                                     code:NSURLErrorCannotDecodeContentData
+                                                 userInfo:nil];
+                return NO;
             }
 
             _zlibStream.avail_out = DECOMPRESSED_CHUNK_LENGTH;
@@ -412,15 +440,16 @@
 
         if (_zlibStreamStatus != Z_OK && _zlibStreamStatus != Z_STREAM_END) {
             SPDY_WARNING(@"error decompressing response data: bad z_stream state");
-            NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
-                                                        code:NSURLErrorCannotDecodeContentData
-                                                    userInfo:nil];
-            [_client URLProtocol:_protocol didFailWithError:error];
+            *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+                                                 code:NSURLErrorCannotDecodeContentData
+                                             userInfo:nil];
+            return NO;
         }
     } else {
         NSData *dataCopy = [[NSData alloc] initWithBytes:data.bytes length:dataLength];
         [_client URLProtocol:_protocol didLoadData:dataCopy];
     }
+    return YES;
 }
 
 #pragma mark CFReadStreamClient
