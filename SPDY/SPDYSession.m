@@ -519,13 +519,11 @@
         stream.receiveWindowSize = _initialReceiveWindowSize;
     }
 
-    NSError *error = nil;
-    if (![stream didLoadData:dataFrame.data error:&error]) {
-        [stream closeWithError:error];
-        return;
-    }
+    [stream didLoadData:dataFrame.data];
 
-    stream.remoteSideClosed = dataFrame.last;
+    if (!stream.closed) {
+        stream.remoteSideClosed = dataFrame.last;
+    }
 }
 
 - (void)didReadSynStreamFrame:(SPDYSynStreamFrame *)synStreamFrame frameDecoder:(SPDYFrameDecoder *)frameDecoder
@@ -596,15 +594,11 @@
         return;
     }
 
-    NSDictionary *headers = synReplyFrame.headers;
-    // FIXME: Should we really pass back an error here?
-    NSError *error = nil;
-    if (![stream didReceiveResponse:headers error:&error]) {
-        [stream closeWithError:error];
-        return;
-    }
+    [stream didReceiveResponse:synReplyFrame.headers];
 
-    stream.remoteSideClosed = synReplyFrame.last;
+    if (!stream.closed) {
+        stream.remoteSideClosed = synReplyFrame.last;
+    }
 }
 
 - (void)didReadRstStreamFrame:(SPDYRstStreamFrame *)rstStreamFrame frameDecoder:(SPDYFrameDecoder *)frameDecoder

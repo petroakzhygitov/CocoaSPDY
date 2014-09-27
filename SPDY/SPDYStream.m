@@ -302,26 +302,28 @@
     return nil;
 }
 
-- (bool)didReceiveResponse:(NSDictionary *)headers error:(NSError **)pError
+- (void)didReceiveResponse:(NSDictionary *)headers
 {
     _receivedReply = YES;
 
     NSInteger statusCode = [headers[@":status"] intValue];
     if (statusCode < 100 || statusCode > 599) {
         NSDictionary *info = @{ NSLocalizedDescriptionKey: @"invalid http response code" };
-        *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+        NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
                                              code:NSURLErrorBadServerResponse
                                          userInfo:info];
-        return NO;
+        [self closeWithError:error];
+        return;
     }
 
     NSString *version = headers[@":version"];
     if (!version) {
         NSDictionary *info = @{ NSLocalizedDescriptionKey: @"response missing version header" };
-        *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+        NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
                                              code:NSURLErrorBadServerResponse
                                          userInfo:info];
-        return NO;
+        [self closeWithError:error];
+        return;
     }
 
     NSMutableDictionary *allHTTPHeaders = [[NSMutableDictionary alloc] init];
@@ -374,10 +376,11 @@
     if (location != nil) {
         NSURL *redirectURL = [[NSURL alloc] initWithString:location relativeToURL:requestURL];
         if (redirectURL == nil) {
-            *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+            NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
                                                  code:NSURLErrorRedirectToNonExistentLocation
                                              userInfo:nil];
-            return NO;
+            [self closeWithError:error];
+            return;
         }
 
         NSMutableURLRequest *redirect = [_protocol.request mutableCopy];
@@ -390,19 +393,18 @@
         }
 
         [_client URLProtocol:_protocol wasRedirectedToRequest:redirect redirectResponse:response];
-        return YES;
+        return;
     }
 
     [_client URLProtocol:_protocol
-          didReceiveResponse:response
-          cacheStoragePolicy:NSURLCacheStorageAllowed];
-    return YES;
+      didReceiveResponse:response
+      cacheStoragePolicy:NSURLCacheStorageAllowed];
 }
 
-- (bool)didLoadData:(NSData *)data error:(NSError **)pError
+- (void)didLoadData:(NSData *)data
 {
     NSUInteger dataLength = data.length;
-    if (dataLength == 0) return YES;  // nothing to do, but not an error
+    if (dataLength == 0) return;
 
     if (_compressedResponse) {
         _zlibStream.avail_in = (uInt)dataLength;
@@ -412,10 +414,11 @@
             uint8_t *inflatedBytes = malloc(sizeof(uint8_t) * DECOMPRESSED_CHUNK_LENGTH);
             if (inflatedBytes == NULL) {
                 SPDY_ERROR(@"error decompressing response data: malloc failed");
-                *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+                NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
                                                      code:NSURLErrorCannotDecodeContentData
                                                  userInfo:nil];
-                return NO;
+                [self closeWithError:error];
+                return;
             }
 
             _zlibStream.avail_out = DECOMPRESSED_CHUNK_LENGTH;
@@ -440,16 +443,16 @@
 
         if (_zlibStreamStatus != Z_OK && _zlibStreamStatus != Z_STREAM_END) {
             SPDY_WARNING(@"error decompressing response data: bad z_stream state");
-            *pError = [[NSError alloc] initWithDomain:NSURLErrorDomain
+            NSError *error = [[NSError alloc] initWithDomain:NSURLErrorDomain
                                                  code:NSURLErrorCannotDecodeContentData
                                              userInfo:nil];
-            return NO;
+            [self closeWithError:error];
+            return;
         }
     } else {
         NSData *dataCopy = [[NSData alloc] initWithBytes:data.bytes length:dataLength];
         [_client URLProtocol:_protocol didLoadData:dataCopy];
     }
-    return YES;
 }
 
 #pragma mark CFReadStreamClient

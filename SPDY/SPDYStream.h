@@ -55,6 +55,6 @@
 - (NSData *)readData:(NSUInteger)length error:(NSError **)pError;
 - (void)cancel;
 - (void)closeWithError:(NSError *)error;
-- (bool)didReceiveResponse:(NSDictionary *)headers error:(NSError **)pError;
-- (bool)didLoadData:(NSData *)data error:(NSError **)pError;
+- (void)didReceiveResponse:(NSDictionary *)headers;
+- (void)didLoadData:(NSData *)data;
 @end
