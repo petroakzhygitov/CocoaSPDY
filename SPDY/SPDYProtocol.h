@@ -76,6 +76,20 @@ extern NSString *const SPDYMetadataSessionLatencyKey;
 */
 + (id<SPDYTLSTrustEvaluator>)sharedTLSTrustEvaluator;
 
+/**
+  Register an alias for the specified origin.
+
+  Requests to the alias that would be handled by SPDY will be dispatched
+  to a SPDY session opened to the aliased origin. The original host header
+  will be preserved on the request.
+*/
++ (void)registerAlias:(NSString *)aliasString forOrigin:(NSString *)originString;
+
+/**
+  Unregister an origin alias.
+*/
++ (void)unregisterAlias:(NSString *)aliasString;
+
 @end
 
 /**

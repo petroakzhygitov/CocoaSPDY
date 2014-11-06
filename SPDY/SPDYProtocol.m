@@ -35,8 +35,10 @@ NSString *const SPDYMetadataStreamTxBytesKey = @"x-spdy-stream-tx-bytes";
 NSString *const SPDYMetadataSessionLatencyKey = @"x-spdy-session-latency";
 
 static char *const SPDYConfigQueue = "com.twitter.SPDYConfigQueue";
-static dispatch_once_t initConfig;
+
+static NSMutableDictionary *aliases;
 static dispatch_queue_t configQueue;
+static dispatch_once_t initConfig;
 
 @implementation SPDYProtocol
 {
@@ -49,6 +51,7 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
 + (void)initialize
 {
     dispatch_once(&initConfig, ^{
+        aliases = [[NSMutableDictionary alloc] init];
         configQueue = dispatch_queue_create(SPDYConfigQueue, DISPATCH_QUEUE_CONCURRENT);
         currentConfiguration = [SPDYConfiguration defaultConfiguration];
     });
@@ -96,6 +99,59 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
     return evaluator;
 }
 
++ (void)registerAlias:(NSString *)aliasString forOrigin:(NSString *)originString
+{
+    SPDYOrigin *alias = [[SPDYOrigin alloc] initWithString:aliasString error:nil];
+    if (!alias) {
+        SPDY_ERROR(@"invalid origin: %@", aliasString);
+        return;
+    }
+
+    SPDYOrigin *origin = [[SPDYOrigin alloc] initWithString:originString error:nil];
+    if (!origin) {
+        SPDY_ERROR(@"invalid origin: %@", originString);
+        return;
+    }
+
+    SPDY_INFO(@"register alias: %@", aliasString);
+    dispatch_barrier_async(configQueue, ^{
+        aliases[alias] = origin;
+        NSDictionary *info = @{ @"origin": originString, @"alias": aliasString };
+        [[NSNotificationCenter defaultCenter] postNotificationName:SPDYOriginRegisteredNotification
+                                                            object:nil
+                                                          userInfo:info];
+        SPDY_DEBUG(@"alias registered: %@", alias);
+    });
+}
+
++ (void)unregisterAlias:(NSString *)aliasString
+{
+    SPDYOrigin *alias = [[SPDYOrigin alloc] initWithString:aliasString error:nil];
+    if (!alias) {
+        SPDY_ERROR(@"invalid origin: %@", aliasString);
+        return;
+    }
+
+    dispatch_barrier_async(configQueue, ^{
+        if (aliases[alias]) {
+            [aliases removeObjectForKey:alias];
+            [[NSNotificationCenter defaultCenter] postNotificationName:SPDYOriginUnregisteredNotification
+                                                                object:nil
+                                                              userInfo:@{ @"alias": aliasString }];
+            SPDY_DEBUG(@"alias unregistered: %@", alias);
+        }
+    });
+}
+
++ (SPDYOrigin *)originForAlias:(SPDYOrigin *)alias
+{
+    __block SPDYOrigin *origin;
+    dispatch_sync(configQueue, ^{
+        origin = aliases[alias];
+    });
+    return origin;
+}
+
 #pragma mark NSURLProtocol implementation
 
 + (BOOL)canInitWithRequest:(NSURLRequest *)request
@@ -120,15 +176,19 @@ static id<SPDYTLSTrustEvaluator> trustEvaluator;
 
     NSError *error;
     SPDYOrigin *origin = [[SPDYOrigin alloc] initWithURL:request.URL error:&error];
-    if (origin) {
-        SPDYSessionManager *manager = [SPDYSessionManager localManagerForOrigin:origin];
-        _stream = [[SPDYStream alloc] initWithProtocol:self];
-        [manager queueStream:_stream];
+    if (!origin) {
+        [self.client URLProtocol:self didFailWithError:error];
+        return;
     }
 
-    if (error) {
-        [self.client URLProtocol:self didFailWithError:error];
+    SPDYOrigin *aliasedOrigin = [SPDYProtocol originForAlias:origin];
+    if (aliasedOrigin) {
+        origin = aliasedOrigin;
     }
+
+    SPDYSessionManager *manager = [SPDYSessionManager localManagerForOrigin:origin];
+    _stream = [[SPDYStream alloc] initWithProtocol:self];
+    [manager queueStream:_stream];
 }
 
 - (void)stopLoading
@@ -181,9 +241,16 @@ static NSMutableSet *origins;
 {
     SPDYOrigin *origin = [[SPDYOrigin alloc] initWithString:originString error:nil];
     SPDY_INFO(@"register origin: %@", origin);
+    if (!origin) {
+        SPDY_ERROR(@"invalid origin: %@", originString);
+        return;
+    }
+
     dispatch_barrier_async(configQueue, ^{
         [origins addObject:origin];
-        [[NSNotificationCenter defaultCenter] postNotificationName:SPDYOriginRegisteredNotification object:nil userInfo:@{ @"origin": originString }];
+        [[NSNotificationCenter defaultCenter] postNotificationName:SPDYOriginRegisteredNotification
+                                                            object:nil
+                                                          userInfo:@{ @"origin": originString }];
         SPDY_DEBUG(@"origin registered: %@", origin);
     });
 }
@@ -191,10 +258,17 @@ static NSMutableSet *origins;
 + (void)unregisterOrigin:(NSString *)originString
 {
     SPDYOrigin *origin = [[SPDYOrigin alloc] initWithString:originString error:nil];
+    if (!origin) {
+        SPDY_ERROR(@"invalid origin: %@", originString);
+        return;
+    }
+
     dispatch_barrier_async(configQueue, ^{
         if ([origins containsObject:origin]) {
             [origins removeObject:origin];
-            [[NSNotificationCenter defaultCenter] postNotificationName:SPDYOriginUnregisteredNotification object:nil userInfo:@{ @"origin": originString }];
+            [[NSNotificationCenter defaultCenter] postNotificationName:SPDYOriginUnregisteredNotification
+                                                                object:nil
+                                                              userInfo:@{ @"origin": originString }];
             SPDY_DEBUG(@"origin unregistered: %@", origin);
         }
     });
@@ -204,7 +278,9 @@ static NSMutableSet *origins;
 {
     dispatch_barrier_async(configQueue, ^{
         [origins removeAllObjects];
-        [[NSNotificationCenter defaultCenter] postNotificationName:SPDYOriginUnregisteredNotification object:nil userInfo:@{ @"origin": @"*" }];
+        [[NSNotificationCenter defaultCenter] postNotificationName:SPDYOriginUnregisteredNotification
+                                                            object:nil
+                                                          userInfo:@{ @"origin": @"*" }];
         SPDY_DEBUG(@"unregistered all origins");
     });
 }
@@ -220,6 +296,11 @@ static NSMutableSet *origins;
     SPDYOrigin *origin = [[SPDYOrigin alloc] initWithURL:request.URL error:nil];
     if (!origin) {
         return NO;
+    }
+
+    SPDYOrigin *aliasedOrigin = [SPDYProtocol originForAlias:origin];
+    if (aliasedOrigin) {
+        origin = aliasedOrigin;
     }
 
     __block bool originRegistered;
