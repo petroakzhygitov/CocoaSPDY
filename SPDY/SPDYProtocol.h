@@ -72,9 +72,9 @@ extern NSString *const SPDYMetadataSessionLatencyKey;
 + (void)setTLSTrustEvaluator:(id<SPDYTLSTrustEvaluator>)evaluator;
 
 /**
-  Accessor for current TLS trust evaluation object.
+  Internal hook for evaluating server trust.
 */
-+ (id<SPDYTLSTrustEvaluator>)sharedTLSTrustEvaluator;
++ (bool)evaluateServerTrust:(SecTrustRef)trust forHost:(NSString *)host;
 
 /**
   Register an alias for the specified origin.
@@ -89,7 +89,6 @@ extern NSString *const SPDYMetadataSessionLatencyKey;
   Unregister an origin alias.
 */
 + (void)unregisterAlias:(NSString *)aliasString;
-
 @end
 
 /**
